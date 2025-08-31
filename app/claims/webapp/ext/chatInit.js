@@ -28,7 +28,7 @@ sap.ui.define([
   function callLLM(model, prompt) {
     return new Promise(function (resolve, reject) {
       try {
-        const ctx = model.bindContext("/callLLM(...)\");
+        const ctx = model.bindContext("/callLLM(...)");
         ctx.setParameter("prompt", prompt || "");
         ctx.execute().then(function () {
           try {
