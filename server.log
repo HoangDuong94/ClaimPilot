@@ -1,0 +1,15 @@
+[cds] - loaded model from 3 file(s):
+
+  srv\service.cds
+  db\schema.cds
+  node_modules\@sap\cds\common.cds
+[cds] - connect to db > sqlite { url: 'db.sqlite', database: 'sqlite.db' }
+[cds] - using auth strategy {
+  kind: 'mocked',
+  impl: 'node_modules\\@sap\\cds\\lib\\srv\\middlewares\\auth\\basic-auth'
+} 
+
+[cds] - serving KfzService { impl: 'srv\\service.js', path: '/service/kfz' }
+
+[cds] - server listening on { url: 'http://localhost:9999' }
+[cds] - server launched in: 830.301ms

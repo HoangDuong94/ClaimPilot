@@ -1,0 +1,4 @@
+ID,fileName,mimeType,storageRef,source,claim_ID
+eeeeeee1-0000-0000-0000-000000000001,claim-1001.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,files/claim-1001/claim.xlsx,email,ccccccc1-0000-0000-0000-000000000001
+eeeeeee2-0000-0000-0000-000000000002,fotos.zip,application/zip,files/claim-1002/fotos.zip,upload,ccccccc2-0000-0000-0000-000000000002
+

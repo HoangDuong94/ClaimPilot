@@ -1,0 +1,20 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log
+
+# CAP/DB
+sqlite.db
+db.sqlite
+*.hdbtabledata
+
+# Env
+.env
+.env.local
+
+# OS/Editor
+.DS_Store
+Thumbs.db
+.vscode/
+*.code-workspace
+

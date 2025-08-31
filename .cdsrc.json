@@ -1,0 +1,17 @@
+{
+  "features": {
+    "odata_new_parser": true
+  },
+  "requires": {
+    "db": {
+      "kind": "sqlite",
+      "credentials": {
+        "database": "sqlite.db"
+      }
+    }
+  },
+  "server": {
+    "port": 9999
+  }
+}
+

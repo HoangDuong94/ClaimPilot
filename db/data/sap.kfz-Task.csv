@@ -1,0 +1,4 @@
+ID,type,status,dueDate,assignee,claim_ID
+fffffff1-0000-0000-0000-000000000001,triage,open,2025-09-02,Sachbearbeiter A,ccccccc1-0000-0000-0000-000000000001
+fffffff2-0000-0000-0000-000000000002,clarify-data,in_progress,2025-09-03,Sachbearbeiter B,ccccccc2-0000-0000-0000-000000000002
+

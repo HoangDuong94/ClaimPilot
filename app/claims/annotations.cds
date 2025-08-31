@@ -1,0 +1,1 @@
+using KfzService as service from '../../srv/service';

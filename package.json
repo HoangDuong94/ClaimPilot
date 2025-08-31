@@ -1,0 +1,38 @@
+{
+  "name": "claimpilot-cap-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CAP Backend for ClaimPilot (KFZ) without Fiori Elements",
+  "scripts": {
+    "start": "cds-serve",
+    "watch": "cds watch",
+    "watch-claims": "cds watch --open claims/webapp/index.html?sap-ui-xx-viewCache=false"
+  },
+  "dependencies": {
+    "@sap/cds": "^8.9.4",
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "@sap/cds-dk": "^8.9.4",
+    "sqlite3": "^5.1.7"
+  },
+  "cds": {
+    "odata": {
+      "version": "v4"
+    },
+    "requires": {
+      "db": {
+        "kind": "sqlite",
+        "credentials": {
+          "database": "sqlite.db"
+        }
+      }
+    },
+    "server": {
+      "port": 9999
+    }
+  },
+  "sapux": [
+    "app/claims"
+  ]
+}
