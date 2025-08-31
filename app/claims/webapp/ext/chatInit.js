@@ -82,9 +82,17 @@ sap.ui.define([
   }
 
   function init() {
-    // floating Button rechts unten
     const model = createModel();
     const dlg = buildDialog(model);
+
+    // Anchor im DOM sicherstellen (robust, unabhängig vom UIArea)
+    let anchor = document.getElementById('claimpilot-fab-anchor');
+    if (!anchor) {
+      anchor = document.createElement('div');
+      anchor.id = 'claimpilot-fab-anchor';
+      document.body.appendChild(anchor);
+    }
+
     const btn = new Button({
       icon: "sap-icon://discussion",
       type: "Emphasized",
@@ -92,16 +100,13 @@ sap.ui.define([
       press: function(){ dlg.open(); }
     });
 
-    // place button in page DOM
     btn.addStyleClass("claimpilot-fab");
-    btn.placeAt("content");
+    btn.placeAt('claimpilot-fab-anchor');
 
-    // inject basic styles
     const style = document.createElement('style');
-    style.textContent = `.claimpilot-fab{position:fixed;bottom:16px;right:16px;z-index:1000}`;
+    style.textContent = `.claimpilot-fab{position:fixed;bottom:16px;right:16px;z-index:10000}`;
     document.head.appendChild(style);
   }
 
   return { init };
 });
-
