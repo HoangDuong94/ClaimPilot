@@ -10,10 +10,10 @@ Wichtig: Die UI und der `callLLM`-Flow funktionieren in diesem Projekt bereits. 
 - Datei: `srv/service.cds`
 
 ```cds
-using { sap.stammtisch as StammtischModel } from '../db/schema';
+using { sap.kfz as KfzModel } from '../db/schema';
 using from '../app/annotations';
 
-service StammtischService @(path: '/service/stammtisch') {
+service KfzService @(path: '/service/kfz') {
   // ... Entities ...
   action callLLM (prompt: String) returns { response: String };
 }
@@ -22,7 +22,7 @@ service StammtischService @(path: '/service/stammtisch') {
 - Datei: `srv/service.js` – Handler der Action (stark gekürzt auf die Essenz):
 
 ```js
-export default class StammtischService extends cds.ApplicationService {
+export default class KfzService extends cds.ApplicationService {
   async init() {
     await super.init();
 
@@ -55,7 +55,7 @@ Verständnis: Der Agent produziert Text (Markdown), der über `MarkdownConverter
 
 ## 2) Frontend: Fiori Elements + Chat-Sidepanel (bereits vorhanden)
 
-- Datei: `app/webapp/main.js` – OData-Action-Aufruf und Rendering der AI-Antwort:
+- Datei: `app/claims/webapp/main.js` – OData-Action-Aufruf und Rendering der AI-Antwort:
 
 ```js
 async callLLMViaOperationBinding(prompt) {
@@ -76,7 +76,7 @@ async function onSend() {
 }
 ```
 
-- Datei: `app/webapp/ext/ChatSidePanelContent.fragment.xml` – UI-Fragment mit `<FormattedText htmlText="{chat>text}"/>`.
+- Datei: `app/claims/webapp/ext/ChatSidePanelContent.fragment.xml` – UI-Fragment mit `<FormattedText htmlText="{chat>text}"/>`.
 
 Damit ist die End-to-End-Kette UI → OData → Agent → HTML → UI bereits gegeben.
 

@@ -13,11 +13,11 @@ ClaimPilot ist ein POC für Kfz‑Schadenmeldungen auf Basis von SAP CAP (Node.j
 ## Quick Start (lokal)
 1) Abhängigkeiten installieren: `npm install`
 2) Starten: `npm start` (oder `cds watch`)
-3) UI öffnen: `http://localhost:9999/app/webapp/index.html`
-4) Service: `http://localhost:9999/service/stammtisch/`
-5) Chat‑Panel nutzen: Prompt eingeben → Backend action `callLLM` liefert HTML
+3) UI öffnen: `http://localhost:9999/claims/webapp/index.html`
+4) Service: `http://localhost:9999/service/kfz/`
+5) Chat‑SidePanel: ist immer offen (DynamicSideContent). Prompt eingeben → Backend‑Action `callLLM` liefert HTML.
 
-Hinweis: Das Repo enthält bereits die OData‑Action `callLLM` und die UI‑Anbindung (siehe `app/webapp/main.js`).
+Hinweis: Die OData‑Action `callLLM` und die UI‑Anbindung sind vorhanden (siehe `app/claims/webapp/main.js`).
 
 ## GenAI (Azure) – empfohlene Variante
 In `srv/service.js` ist ein Azure‑Client im Einsatz. Setze die Azure‑Umgebung passend zu deinem Deployment:

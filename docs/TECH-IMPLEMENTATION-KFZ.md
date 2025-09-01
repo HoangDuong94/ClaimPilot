@@ -6,10 +6,10 @@ Ziel: Ein funktionsfähiger POC, der E‑Mails (Microsoft 365 CLI) findet, Excel
 
 
 ## 0) Überblick der bestehenden Bausteine (aus diesem Repo)
-- OData‑Service: `srv/service.cds` mit Action `callLLM(prompt)` → Pfad `/service/stammtisch`.
+- OData‑Service: `srv/service.cds` mit Action `callLLM(prompt)` → Pfad `/service/kfz`.
 - Service‑Handler: `srv/service.js` initialisiert einen Agenten (LangGraph) mit MCP‑Tools (Postgres, Brave, Playwright, Filesystem, Excel) und beantwortet `callLLM` mit HTML.
 - Markdown → HTML: `srv/utils/markdown-converter.js` (optimiert für UI5 `FormattedText`).
-- UI5 App: `app/webapp/manifest.json`, `app/webapp/main.js`, Chat‑Fragment `app/webapp/ext/ChatSidePanelContent.fragment.xml`.
+- UI5 App: `app/claims/webapp/manifest.json`, `app/claims/webapp/main.js`, Chat‑Fragment `app/claims/webapp/ext/ChatSidePanelContent.fragment.xml`.
 
 Diese Strukturen bleiben erhalten. Für Kfz fügen wir M365‑MCP hinzu und passen den System‑Prompt (Agent) an.
 
@@ -22,14 +22,14 @@ Diese Strukturen bleiben erhalten. Für Kfz fügen wir M365‑MCP hinzu und pass
 Installieren/Starten:
 - `npm install`
 - `npm start` (oder `cds watch`)
-- Frontend: `http://localhost:9999/app/webapp/index.html`
-- Service: `http://localhost:9999/service/stammtisch/`
+- Frontend: `http://localhost:9999/claims/webapp/index.html`
+- Service: `http://localhost:9999/service/kfz/`
 
 
 ## 2) Fiori Elements: Setup und Chat‑Integration (bestehendes Muster)
-- Manifest: `app/webapp/manifest.json` – OData‑Quelle "/service/stammtisch/", Routen/Targets, Actions.
-- Component: `app/webapp/Component.js` – hält Referenzen auf Chat‑Model/SideContent; Methode `invokeAIActionOnCurrentPage`.
-- Bootstrap/Chat: `app/webapp/main.js`
+- Manifest: `app/claims/webapp/manifest.json` – OData‑Quelle "/service/kfz/", Routen/Targets.
+- Component: `app/claims/webapp/Component.js` – hält Referenzen auf Chat‑Model/SideContent; Methode `invokeAIActionOnCurrentPage`.
+- Bootstrap/Chat: `app/claims/webapp/main.js`
   - Erstellt `DynamicSideContent` und lädt `ext/ChatSidePanelContent.fragment.xml`.
   - OData‑Action‑Call: `callLLMViaOperationBinding(prompt)` nutzt `bindContext("/callLLM(...)")` und liefert `result.response` (HTML) zurück.
   - Anzeige: `handleAIResponseEnhanced(html)` schreibt die HTML‑Antwort ins Chat‑Model.
@@ -184,8 +184,8 @@ Beispiel (optional):
 
 ## 6) End‑to‑End Test (manuell)
 1) Start: `cds watch` (oder `npm start`).
-2) Öffne UI: `http://localhost:9999/app/webapp/index.html`.
-3) Chat‑Panel öffnen (Button im ObjectPage Kontext verfügbar, siehe Manifest‑Action).
+2) Öffne UI: `http://localhost:9999/claims/webapp/index.html`.
+3) Chat‑SidePanel ist dauerhaft offen (DynamicSideContent, kein Button mehr erforderlich).
 4) Prompt im Panel:
    - „Lies die neueste Schadenmail aus dem Ordner Eingang, lade den Excel‑Anhang, … und fasse als HTML zusammen.“
 5) Konsole beobachten: `srv/service.js` loggt verfügbare Tools und Tool‑Calls (inkl. Arguments/Tool‑Outputs im Stream).
