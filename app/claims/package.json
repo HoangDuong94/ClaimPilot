@@ -5,7 +5,14 @@
   "keywords": [
     "ui5",
     "openui5",
-    "sapui5"
+    "sapui5",
+    "fiori",
+    "fiori-elements",
+    "odata-v4",
+    "cap",
+    "ai",
+    "chat",
+    "sidepanel"
   ],
   "main": "webapp/index.html",
   "dependencies": {},
@@ -14,6 +21,8 @@
     "@sap/ux-ui5-tooling": "1"
   },
   "scripts": {
+    "start": "ui5 serve -o /index.html",
+    "build": "ui5 build --all",
     "deploy-config": "npx -p @sap/ux-ui5-tooling fiori add deploy-config cf"
   }
 }
