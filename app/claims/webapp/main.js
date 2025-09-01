@@ -1,20 +1,22 @@
 sap.ui.define([
   "sap/ui/core/Component",
   "sap/ui/core/ComponentContainer",
-  "sap/ui/layout/DynamicSideContent",
+  "sap/ui/layout/Splitter",
+  "sap/ui/layout/SplitterLayoutData",
   "sap/ui/core/Fragment",
   "sap/ui/model/json/JSONModel",
   "sap/m/App",
   "sap/m/Page",
   "sap/m/Bar",
-  "sap/m/Title"
-], function (Component, ComponentContainer, DynamicSideContent, Fragment, JSONModel, App, Page, Bar, Title) {
+  "sap/m/Title",
+  "sap/m/Panel"
+], function (Component, ComponentContainer, Splitter, SplitterLayoutData, Fragment, JSONModel, App, Page, Bar, Title, Panel) {
   "use strict";
 
   const chatManager = {
     chatModel: null,
-    dynamicSideContent: null,
     feAppComponentInstance: null,
+    rightPane: null,
 
     initModel: function () {
       this.chatModel = new JSONModel({
@@ -32,14 +34,12 @@ sap.ui.define([
       history.push({ type, text });
       this.chatModel.setProperty("/chatHistory", history);
       this.chatModel.refresh(true);
-      if (this.dynamicSideContent) {
-        setTimeout(function () {
-          try {
-            const sc = sap.ui.core.Fragment.byId("chatSidePanelFragmentGlobal", "chatHistoryScrollContainerInSidePanel");
-            sc && sc.scrollTo(0, 99999, 200);
-          } catch (e) { /* ignore */ }
-        }, 100);
-      }
+      setTimeout(function () {
+        try {
+          const sc = sap.ui.core.Fragment.byId("chatSidePanelFragmentGlobal", "chatHistoryScrollContainerInSidePanel");
+          sc && sc.scrollTo(0, 99999, 200);
+        } catch (e) { /* ignore */ }
+      }, 100);
     },
 
     sendViaODataAction: async function (prompt) {
@@ -85,38 +85,43 @@ sap.ui.define([
   };
 
   async function init() {
-    // Prepare model and side content
+    // Prepare model
     chatManager.initModel();
-    chatManager.dynamicSideContent = new DynamicSideContent("appDynamicSideContentGlobal", {
-      showSideContent: true
-    });
-    chatManager.dynamicSideContent.setModel(chatManager.chatModel, "chat");
 
     // Load chat panel fragment
-    const chatPanel = await Fragment.load({
+    const chatPanelContent = await Fragment.load({
       id: "chatSidePanelFragmentGlobal",
       name: "de.claimpilot.claims.ext.ChatSidePanelContent",
       controller: chatController
     });
-    chatManager.dynamicSideContent.addSideContent(chatPanel);
 
-    // Create FE component and wire dependencies
+    // Wrap chat content in a Panel to ensure setVisible and full height
+    chatManager.rightPane = new Panel("chatRightPane", { content: [chatPanelContent], height: "100%" });
+    chatManager.rightPane.setModel(chatManager.chatModel, "chat");
+    chatManager.rightPane.setLayoutData(new SplitterLayoutData({ size: "420px", resizable: true, minSize: 280 }));
+
+    // Create FE component and container (left side)
     const feComponent = await Component.create({ name: "de.claimpilot.claims", id: "feAppComponentCore" });
     chatManager.feAppComponentInstance = feComponent;
+    const container = new ComponentContainer({ component: feComponent, height: "100%" });
+
+    // Splitter with two areas: left (FE), right (Chat)
+    const splitter = new Splitter("mainSplitter", { height: "100%" });
+    splitter.addContentArea(container);
+    splitter.addContentArea(chatManager.rightPane);
+
+    // Wire dependencies for FE component (provide chat model and pane)
     if (feComponent.setExternalDependencies) {
-      feComponent.setExternalDependencies(chatManager.chatModel, chatManager.dynamicSideContent);
+      feComponent.setExternalDependencies(chatManager.chatModel, chatManager.rightPane);
     }
 
-    // Add main content and mount app
-    const container = new ComponentContainer({ component: feComponent, height: "100%" });
-    chatManager.dynamicSideContent.addMainContent(container);
-
-    const page = new Page("mainAppPage", { showHeader: false, content: [chatManager.dynamicSideContent], height: "100%" });
+    // Mount app
+    const page = new Page("mainAppPage", { showHeader: false, content: [splitter], height: "100%" });
     const app = new App({ pages: [page], height: "100%" });
     app.placeAt("appHost");
 
     // Expose for other modules if needed
-    try { window.claimpilotChat = { model: chatManager.chatModel, panel: chatManager.dynamicSideContent, sendPrompt: chatController.onSendChatMessageInSidePanel.bind(chatController) }; } catch (e) {}
+    try { window.claimpilotChat = { model: chatManager.chatModel, panel: chatManager.rightPane, sendPrompt: chatController.onSendChatMessageInSidePanel.bind(chatController) }; } catch (e) {}
   }
 
   return { init };
