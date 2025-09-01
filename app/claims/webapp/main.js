@@ -95,6 +95,23 @@ sap.ui.define([
       controller: chatController
     });
 
+    // Enable Enter-to-send on the TextArea, ensure change lifecycle fires first
+    try {
+      const input = sap.ui.core.Fragment.byId("chatSidePanelFragmentGlobal", "chatInputField");
+      if (input && input.attachBrowserEvent) {
+        input.attachBrowserEvent("keydown", function (ev) {
+          if (ev.key === "Enter" && !ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+            ev.preventDefault();
+            try {
+              // Update binding by firing change before sending
+              input.fireChange({ value: input.getValue() });
+            } catch (e) { /* ignore */ }
+            chatController.onSendChatMessageInSidePanel();
+          }
+        });
+      }
+    } catch (e) { /* ignore */ }
+
     // Wrap chat content in a Panel to ensure setVisible and full height
     chatManager.rightPane = new Panel("chatRightPane", { content: [chatPanelContent], height: "100%" });
     chatManager.rightPane.setModel(chatManager.chatModel, "chat");
