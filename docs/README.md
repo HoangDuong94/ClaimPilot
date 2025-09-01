@@ -57,3 +57,15 @@ Das praxisnahe Sachbearbeiter‑Layout (Blätter, Pflichtfelder, Validierungen, 
 - Optional Persistenz v1 (Claim/Email/Document) gemäß Validierungsplan
 
 Bei Fragen: starte mit `docs/TECH-IMPLEMENTATION-KFZ.md` und nutze die Prompts aus `docs/PROMPT-LIBRARY.md`.
+
+## Troubleshooting (Fiori Elements)
+- Spalten fehlen im List Report:
+  - Sicherstellen, dass `srv/fe-annotations.cds` geladen wird (UI.LineItem vorhanden).
+  - Nach Änderungen an Service/Views: `npx cds deploy --to sqlite:sqlite.db`.
+  - In der UI die Tabellen‑Variante („Reset Table“) zurücksetzen.
+- Create/Edit/Delete nicht sichtbar:
+  - `@odata.draft.enabled` an der Service‑Entität prüfen.
+  - Capabilities (`Insert/Update/DeleteRestrictions`) im Metadata vorhanden?
+  - Im Manifest `creationMode` gesetzt (z. B. NewPage)?
+- Detailseite ohne Inhalte:
+  - `UI.Facets` + `UI.FieldGroup` sind erforderlich; siehe `srv/fe-annotations.cds`.

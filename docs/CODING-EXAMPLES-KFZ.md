@@ -199,6 +199,128 @@ Erwartete Tool-Sequenz (vom Agenten):
 
 Beispiel-HTML (kompakt):
 
+## 6) FE V4 – CUD + Draft + Facets (Code-Snippets)
+
+- service.cds (Draft + Projektion auf Basisentität):
+
+```cds
+using { sap.kfz as kfz } from '../db/schema';
+
+service KfzService @(path:'/service/kfz') {
+  @odata.draft.enabled
+  entity Claim as projection on kfz.Claim;
+  entity Email     as projection on kfz.Email;
+  entity Document  as projection on kfz.Document;
+  entity Task      as projection on kfz.Task;
+}
+```
+
+- fe-annotations.cds (Spalten, Facets, CUD, ValueHelp):
+
+```cds
+using KfzService as service from './service';
+
+annotate service.Claim with @(
+  UI.HeaderInfo : {
+    TypeName       : 'Schaden',
+    TypeNamePlural : 'Schaeden',
+    Title          : { Value : claimNumber },
+    Description    : { Value : status }
+  },
+  UI.SelectionFields : [ claimNumber, status, severity, lossDate ],
+  UI.LineItem : [
+    { $Type: 'UI.DataField', Value: claimNumber,           Label: 'Claim'        },
+    { $Type: 'UI.DataField', Value: policy.policyNumber,   Label: 'Police'       },
+    { $Type: 'UI.DataField', Value: vehicle.plate,         Label: 'Kennzeichen'  },
+    { $Type: 'UI.DataField', Value: lossDate,              Label: 'Schadendatum' },
+    { $Type: 'UI.DataField', Value: status,                Label: 'Status'       }
+  ],
+  UI.Facets : [
+    { $Type: 'UI.ReferenceFacet', Label: 'Allgemeine Informationen', Target: '@UI.FieldGroup#General' },
+    { $Type: 'UI.ReferenceFacet', Label: 'Beschreibung',             Target: '@UI.FieldGroup#Description' },
+    { $Type: 'UI.ReferenceFacet', Label: 'E-Mails',                  Target: 'emails/@UI.LineItem' },
+    { $Type: 'UI.ReferenceFacet', Label: 'Dokumente',                Target: 'documents/@UI.LineItem' },
+    { $Type: 'UI.ReferenceFacet', Label: 'Aufgaben',                 Target: 'tasks/@UI.LineItem' }
+  ],
+  UI.FieldGroup #General : {
+    Data: [
+      { Value: claimNumber,           Label: 'Claim' },
+      { Value: status,                Label: 'Status' },
+      { Value: severity,              Label: 'Schadenschwere' },
+      { Value: lossDate,              Label: 'Schadendatum' },
+      { Value: reportedDate,          Label: 'Meldedatum' },
+      { Value: policy.policyNumber,   Label: 'Police' },
+      { Value: vehicle.plate,         Label: 'Kennzeichen' },
+      { Value: reserveAmount,         Label: 'Reserve' }
+    ]
+  },
+  UI.FieldGroup #Description : { Data: [ { Value: description, Label: 'Beschreibung' } ] }
+);
+
+annotate service.Claim with {
+  description   @title: 'Beschreibung' @UI.MultiLineText;
+  claimNumber   @title: 'Claim';
+  status        @title: 'Status';
+  severity      @title: 'Schadenschwere';
+  lossDate      @title: 'Schadendatum';
+  reportedDate  @title: 'Meldedatum';
+  reserveAmount @title: 'Reserve';
+};
+
+// CUD
+annotate service.Claim with @(
+  Capabilities.InsertRestrictions: { Insertable: true },
+  Capabilities.UpdateRestrictions: { Updatable:  true },
+  Capabilities.DeleteRestrictions: { Deletable:  true }
+);
+
+// Value Help
+annotate service.Claim with {
+  policy @Common.ValueList: {
+    $Type: 'Common.ValueListType', CollectionPath: 'Policy', Parameters: [
+      { $Type: 'Common.ValueListParameterInOut',  LocalDataProperty: policy_ID,  ValueListProperty: 'ID' },
+      { $Type: 'Common.ValueListParameterDisplayOnly', ValueListProperty: 'policyNumber' }
+    ]
+  };
+  vehicle @Common.ValueList: {
+    $Type: 'Common.ValueListType', CollectionPath: 'Vehicle', Parameters: [
+      { $Type: 'Common.ValueListParameterInOut',  LocalDataProperty: vehicle_ID, ValueListProperty: 'ID' },
+      { $Type: 'Common.ValueListParameterDisplayOnly', ValueListProperty: 'plate' }
+    ]
+  };
+};
+```
+
+- manifest.json (List Report Tabelle):
+
+```json
+{
+  "sap.ui5": {
+    "routing": {
+      "targets": {
+        "ClaimList": {
+          "options": { "settings": {
+            "controlConfiguration": {
+              "@com.sap.vocabularies.UI.v1.LineItem": {
+                "tableSettings": {
+                  "type": "ResponsiveTable",
+                  "creationMode": { "name": "NewPage" },
+                  "initialVisibleFields": "claimNumber,policy.policyNumber,vehicle.plate,lossDate,status,severity,reportedDate"
+                }
+              }
+            }
+          } }
+        }
+      }
+    }
+  }
+}
+```
+
+Tipps
+- Nach Modelländerungen: `npx cds deploy --to sqlite:sqlite.db` (Views/Draft aktualisieren).
+- Wenn Spalten/Aktionen fehlen: Tabellen‑/Seitenvariante zurücksetzen (Personalisierung kann Defaults übersteuern).
+
 ```html
 <h2 class="ai-header-2">Aktionen</h2>
 <ul class="ai-unordered-list">

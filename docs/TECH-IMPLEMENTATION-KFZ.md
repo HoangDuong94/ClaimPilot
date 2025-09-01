@@ -203,3 +203,31 @@ Beispiel (optional):
 - GenAI‑Hub ist in `package.json` konfiguriert – Ziel ist, die Connection über BTP Destination sicherzustellen oder alternativ Azure direkt zu setzen.
 
 Damit kann ein Coding‑Agent die Kfz‑Schaden‑Variante deterministisch umsetzen und testen.
+
+## 9) FE V4 – Aktueller Stand (Session Update)
+
+- Service/Entitäten:
+  - `srv/service.cds`: `KfzService.Claim` ist eine Projektion auf die Basisentität `sap.kfz.Claim` und ist mit `@odata.draft.enabled` versehen (Draft‑Modus aktiv).
+  - Begleitende View `srv/claim-flat.cds` bleibt als Referenz bestehen, wird aber nicht mehr projiziert.
+
+- UI‑Annotations (Fiori Elements V4):
+  - Neue Datei `srv/fe-annotations.cds` mit folgenden Inhalten:
+    - `UI.HeaderInfo`, `UI.SelectionFields`, `UI.LineItem` für `service.Claim` (Spalten erscheinen direkt im List Report).
+    - `UI.Facets` + `UI.FieldGroup#General`/`#Description` für die Object Page (Detailseite gefüllt).
+    - Child‑Tabellen als Facets: `emails/@UI.LineItem`, `documents/@UI.LineItem`, `tasks/@UI.LineItem`.
+    - Labels: Für FieldGroup‑Felder sind explizite `Label` gesetzt; Properties tragen `@title` (z. B. „Claim“, „Status“, „Schadendatum“).
+    - CUD‑Freigabe: `Capabilities.InsertRestrictions/UpdateRestrictions/DeleteRestrictions` für Claim, Email, Document, Task.
+    - ValueHelp: `@Common.ValueList` für `policy_ID` und `vehicle_ID` (Anzeige `policyNumber` bzw. `plate`).
+
+- Manifest (List Report):
+  - Datei `app/claims/webapp/manifest.json` → `tableSettings`:
+    - `initialVisibleFields`: `claimNumber,policy.policyNumber,vehicle.plate,lossDate,status,severity,reportedDate`.
+    - `creationMode: { name: "NewPage" }` (Create‑Button sichtbar).
+
+- Build/Deploy Hinweise:
+  - Nach Modell‑/View‑Änderungen: `npx cds deploy --to sqlite:sqlite.db` ausführen (Views/Draft‑Tabellen aktualisieren).
+  - Personalisierungen können Startspalten/Aktionen überdecken → im UI „Reset Table“/Variante zurücksetzen.
+
+- Ergebnis:
+  - List Report zeigt Standardspalten und Create‑Button.
+  - Object Page zeigt Abschnitte mit Labels; Edit/Delete (Draft) sind sichtbar.
