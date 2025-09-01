@@ -9,6 +9,10 @@
         html, body, body > div, #container, #container-uiarea {
             height: 100%;
         }
+        /* Reserve space for the always-open side panel */
+        body {
+            padding-right: 440px;
+        }
     </style>
     <script
         id="sap-ui-bootstrap"
@@ -17,28 +21,21 @@
         data-sap-ui-resourceroots='{
             "de.claimpilot.claims": "./"
         }'
-        data-sap-ui-oninit="module:sap/ui/core/ComponentSupport"
         data-sap-ui-compatVersion="edge"
         data-sap-ui-async="true"
         data-sap-ui-frameOptions="trusted"
     ></script>
     <script>
         sap.ui.getCore().attachInit(function() {
-            sap.ui.require(["de/claimpilot/claims/ext/chatInit"], function(chat) {
-                if (chat && typeof chat.init === 'function') {
-                    chat.init();
+            sap.ui.require(["de/claimpilot/claims/main"], function(main) {
+                if (main && typeof main.init === 'function') {
+                    main.init();
                 }
             });
         });
     </script>
 </head>
 <body class="sapUiBody sapUiSizeCompact" id="content">
-    <div
-        data-sap-ui-component
-        data-name="de.claimpilot.claims"
-        data-id="container"
-        data-settings='{"id" : "de.claimpilot.claims"}'
-        data-handle-validation="true"
-    ></div>
+    <div id="appHost" style="height: 100%; width: 100%"></div>
 </body>
 </html>

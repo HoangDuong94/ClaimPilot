@@ -49,7 +49,8 @@
       "libs": {
         "sap.m": {},
         "sap.ui.core": {},
-        "sap.fe.templates": {}
+        "sap.fe.templates": {},
+        "sap.ui.layout": {}
       }
     },
     "contentDensities": {
@@ -103,6 +104,18 @@
             "settings": {
               "contextPath": "/Claim",
               "variantManagement": "Page",
+              "content": {
+                "header": {
+                  "actions": {
+                    "AIChatOpenLR": {
+                      "press": "de.claimpilot.claims.ext.CustomActions.askAI",
+                      "enabled": true,
+                      "visible": true,
+                      "text": "AI Chat"
+                    }
+                  }
+                }
+              },
               "navigation": {
                 "Claim": {
                   "detail": {
@@ -130,7 +143,29 @@
           "options": {
             "settings": {
               "editableHeaderContent": false,
-              "contextPath": "/Claim"
+              "contextPath": "/Claim",
+              "content": {
+                "header": {
+                  "actions": {
+                    "AIChatOpenOP": {
+                      "press": "de.claimpilot.claims.ext.CustomActions.askAI",
+                      "enabled": true,
+                      "visible": true,
+                      "text": "AI Chat"
+                    }
+                  }
+                },
+                "footer": {
+                  "actions": {
+                    "AIChatOpenFooter": {
+                      "press": "de.claimpilot.claims.ext.CustomActions.askAI",
+                      "enabled": true,
+                      "visible": true,
+                      "text": "AI Chat"
+                    }
+                  }
+                }
+              }
             }
           }
         }
