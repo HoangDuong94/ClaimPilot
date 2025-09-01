@@ -60,8 +60,8 @@ sap.ui.define([
   };
 
   const chatController = {
-    onSendChatMessageInSidePanel: async function () {
-      const text = (chatManager.chatModel.getProperty("/userInput") || "").trim();
+    onSendChatMessageInSidePanel: async function (overrideText) {
+      const text = (overrideText != null ? String(overrideText) : (chatManager.chatModel.getProperty("/userInput") || "")).trim();
       if (!text) { return; }
       chatManager.chatModel.setProperty("/userInput", "");
       chatManager.addMessage("user", text);
@@ -95,7 +95,7 @@ sap.ui.define([
       controller: chatController
     });
 
-    // Enable Enter-to-send on the TextArea, ensure change lifecycle fires first
+    // Enable Enter-to-send on the TextArea; ensure latest value is in the model before sending
     try {
       const input = sap.ui.core.Fragment.byId("chatSidePanelFragmentGlobal", "chatInputField");
       if (input && input.attachBrowserEvent) {
@@ -103,10 +103,14 @@ sap.ui.define([
           if (ev.key === "Enter" && !ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
             ev.preventDefault();
             try {
-              // Update binding by firing change before sending
-              input.fireChange({ value: input.getValue() });
+              const val = input.getValue();
+              // Write to bound model first so getProperty sees the latest
+              chatManager.chatModel.setProperty("/userInput", val);
+              // Also trigger the control's change lifecycle for consistency
+              if (typeof input.fireChange === 'function') input.fireChange({ value: val });
+              // Send using the captured value to avoid any race
+              chatController.onSendChatMessageInSidePanel(val);
             } catch (e) { /* ignore */ }
-            chatController.onSendChatMessageInSidePanel();
           }
         });
       }
