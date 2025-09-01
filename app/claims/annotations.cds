@@ -1,25 +1,25 @@
-using KfzService as service from '../../srv/service';
+﻿using KfzService as service from '../../srv/service';
 
 annotate service.Claim with @com.sap.vocabularies.UI.v1: {
   HeaderInfo: {
     TypeName: 'Schaden',
-    TypeNamePlural: 'Schäden',
-    Title: { Value: { $Path: 'claimNumber' } },
-    Description: { Value: { $Path: 'status' } }
+    TypeNamePlural: 'Schaeden',
+    Title: { Value: claimNumber },
+    Description: { Value: status }
   },
   SelectionFields: [
-    { $PropertyPath: 'claimNumber' },
-    { $PropertyPath: 'status' },
-    { $PropertyPath: 'severity' },
-    { $PropertyPath: 'lossDate' }
+    { $PropertyPath: claimNumber },
+    { $PropertyPath: status },
+    { $PropertyPath: severity },
+    { $PropertyPath: lossDate }
   ],
   LineItem: [
-    { $Type: 'com.sap.vocabularies.UI.v1.DataField', Value: { $Path: 'claimNumber' }, Label: 'Claim' },
-    { $Type: 'com.sap.vocabularies.UI.v1.DataField', Value: { $Path: 'policy/policyNumber' }, Label: 'Police' },
-    { $Type: 'com.sap.vocabularies.UI.v1.DataField', Value: { $Path: 'vehicle/plate' }, Label: 'Kennzeichen' },
-    { $Type: 'com.sap.vocabularies.UI.v1.DataField', Value: { $Path: 'lossDate' }, Label: 'Schadendatum' },
-    { $Type: 'com.sap.vocabularies.UI.v1.DataField', Value: { $Path: 'status' }, Label: 'Status' },
-    { $Type: 'com.sap.vocabularies.UI.v1.DataField', Value: { $Path: 'severity' }, Label: 'Schadenschwere' },
-    { $Type: 'com.sap.vocabularies.UI.v1.DataField', Value: { $Path: 'reportedDate' }, Label: 'Meldedatum' }
+    { $Type: 'com.sap.vocabularies.UI.v1.DataField', Value: claimNumber, Label: 'Claim', ![@com.sap.vocabularies.UI.v1.Importance]: #High },
+    { $Type: 'com.sap.vocabularies.UI.v1.DataField', Value: policyNumber, Label: 'Police', ![@com.sap.vocabularies.UI.v1.Importance]: #High },
+    { $Type: 'com.sap.vocabularies.UI.v1.DataField', Value: plate, Label: 'Kennzeichen', ![@com.sap.vocabularies.UI.v1.Importance]: #High },
+    { $Type: 'com.sap.vocabularies.UI.v1.DataField', Value: lossDate, Label: 'Schadendatum', ![@com.sap.vocabularies.UI.v1.Importance]: #High },
+    { $Type: 'com.sap.vocabularies.UI.v1.DataField', Value: status, Label: 'Status', ![@com.sap.vocabularies.UI.v1.Importance]: #High },
+    { $Type: 'com.sap.vocabularies.UI.v1.DataField', Value: severity, Label: 'Schadenschwere' },
+    { $Type: 'com.sap.vocabularies.UI.v1.DataField', Value: reportedDate, Label: 'Meldedatum' }
   ]
 };

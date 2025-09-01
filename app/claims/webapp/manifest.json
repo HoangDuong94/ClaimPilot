@@ -113,7 +113,10 @@
               "controlConfiguration": {
                 "@com.sap.vocabularies.UI.v1.LineItem": {
                   "tableSettings": {
-                    "type": "ResponsiveTable"
+                    "type": "ResponsiveTable",
+                    "creationMode": { "name": "NewPage" },
+                    "personalization": { "column": true, "sort": true, "filter": true },
+                    "initialVisibleFields": "claimNumber,policy.policyNumber,vehicle.plate,lossDate,status,severity,reportedDate"
                   }
                 }
               }

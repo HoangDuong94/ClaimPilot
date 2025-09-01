@@ -10,7 +10,10 @@
   },
   "dependencies": {
     "@sap/cds": "^8.9.4",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "@sap-cloud-sdk/connectivity": "^3",
+    "@sap-cloud-sdk/http-client": "^3",
+    "@sap-cloud-sdk/resilience": "^3"
   },
   "devDependencies": {
     "@sap/cds-dk": "^8.9.4",
@@ -26,6 +29,10 @@
         "credentials": {
           "database": "sqlite.db"
         }
+      },
+      "gen": {
+        "kind": "odata",
+        "model": "srv/external/gen"
       }
     },
     "server": {
