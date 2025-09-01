@@ -6,7 +6,7 @@
 
     <VBox width="100%" height="100%" class="cpChatSidePanel" renderType="Bare">
         <Toolbar>
-            <Title text="AI Chat"/>
+            <Title text="PureAI"/>
         </Toolbar>
 
         <ScrollContainer id="chatHistoryScrollContainerInSidePanel" width="100%" height="100%" vertical="true">
@@ -33,7 +33,7 @@
                 <TextArea
                     id="chatInputField"
                     value="{chat>/userInput}"
-                    placeholder="Nachricht an AI Assistant..."
+                    placeholder="Nachricht an PureAI..."
                     rows="3"
                     width="100%"
                     growing="true"
