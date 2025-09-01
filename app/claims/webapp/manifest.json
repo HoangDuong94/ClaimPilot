@@ -105,16 +105,7 @@
               "contextPath": "/Claim",
               "variantManagement": "Page",
               "content": {
-                "header": {
-                  "actions": {
-                    "AIChatOpenLR": {
-                      "press": "de.claimpilot.claims.ext.CustomActions.askAI",
-                      "enabled": true,
-                      "visible": true,
-                      "text": "AI Chat"
-                    }
-                  }
-                }
+                "header": {}
               },
               "navigation": {
                 "Claim": {
@@ -145,26 +136,8 @@
               "editableHeaderContent": false,
               "contextPath": "/Claim",
               "content": {
-                "header": {
-                  "actions": {
-                    "AIChatOpenOP": {
-                      "press": "de.claimpilot.claims.ext.CustomActions.askAI",
-                      "enabled": true,
-                      "visible": true,
-                      "text": "AI Chat"
-                    }
-                  }
-                },
-                "footer": {
-                  "actions": {
-                    "AIChatOpenFooter": {
-                      "press": "de.claimpilot.claims.ext.CustomActions.askAI",
-                      "enabled": true,
-                      "visible": true,
-                      "text": "AI Chat"
-                    }
-                  }
-                }
+                "header": {},
+                "footer": {}
               }
             }
           }
