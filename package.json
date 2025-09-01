@@ -29,10 +29,6 @@
         "credentials": {
           "database": "sqlite.db"
         }
-      },
-      "gen": {
-        "kind": "odata",
-        "model": "srv/external/gen"
       }
     },
     "server": {
