@@ -15,7 +15,7 @@ ClaimPilot ist ein POC für Kfz‑Schadenmeldungen auf Basis von SAP CAP (Node.j
 2) Starten: `npm start` (oder `cds watch`)
 3) UI öffnen: `http://localhost:9999/claims/webapp/index.html`
 4) Service: `http://localhost:9999/service/kfz/`
-5) Chat‑SidePanel: ist immer offen (DynamicSideContent). Prompt eingeben → Backend‑Action `callLLM` liefert HTML.
+5) PureAI‑SidePanel: ist immer offen (Splitter/SidePanel). Prompt eingeben → Backend‑Action `callLLM` liefert HTML.
 
 Hinweis: Die OData‑Action `callLLM` und die UI‑Anbindung sind vorhanden (siehe `app/claims/webapp/main.js`).
 

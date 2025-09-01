@@ -1,6 +1,6 @@
 # ClaimPilot – CODING EXAMPLES – Kfz-Schaden (POC)
 
-Diese Datei liefert konkrete, referenzierbare Beispiele für ClaimPilot. Sie führen Schritt für Schritt durch CAP, Fiori Elements, das Chat-Sidepanel sowie die Agent-Integration mit Excel und Microsoft 365 CLI MCP (m365GetCommands, m365GetCommandDocs, m365RunCommand).
+Diese Datei liefert konkrete, referenzierbare Beispiele für ClaimPilot. Sie führen Schritt für Schritt durch CAP, Fiori Elements, das PureAI‑SidePanel sowie die Agent-Integration mit Excel und Microsoft 365 CLI MCP (m365GetCommands, m365GetCommandDocs, m365RunCommand).
 
 Wichtig: Die UI und der `callLLM`-Flow funktionieren in diesem Projekt bereits. Die Beispiele zeigen, wie du minimal ergänzen/konfigurieren kannst, ohne das Grundgerüst zu ändern.
 
@@ -53,7 +53,7 @@ export default class KfzService extends cds.ApplicationService {
 Verständnis: Der Agent produziert Text (Markdown), der über `MarkdownConverter` in HTML für das UI5-`FormattedText` gewandelt wird.
 
 
-## 2) Frontend: Fiori Elements + Chat-Sidepanel (bereits vorhanden)
+## 2) Frontend: Fiori Elements + PureAI‑SidePanel (bereits vorhanden)
 
 - Datei: `app/claims/webapp/main.js` – OData-Action-Aufruf und Rendering der AI-Antwort:
 

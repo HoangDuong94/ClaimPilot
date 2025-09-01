@@ -9,7 +9,7 @@ Diese Datei beschreibt den Agenten so konkret, dass er möglichst deterministisc
 ## Projekt-Bezug (Beispiele aus diesem Repo)
 - Ungebundene Action: `srv/service.cds` definiert `action callLLM(prompt: String) returns { response: String };` und Service-Pfad `/service/kfz`.
 - Action-Handler: `srv/service.js` instanziiert den Agenten, streamt Antworten und konvertiert Markdown → HTML via `srv/utils/markdown-converter.js`.
-- UI‑Aufruf: `app/claims/webapp/main.js` nutzt `oDataModel.bindContext("/callLLM(...)")` in `callLLMViaOperationBinding(prompt)`, fügt HTML in das Chat‑Sidepanel ein (siehe `app/claims/webapp/ext/ChatSidePanelContent.fragment.xml`).
+- UI‑Aufruf: `app/claims/webapp/main.js` nutzt `oDataModel.bindContext("/callLLM(...)")` in `callLLMViaOperationBinding(prompt)`, fügt HTML in das PureAI‑SidePanel ein (siehe `app/claims/webapp/ext/ChatSidePanelContent.fragment.xml`).
 - HTML‑Konvention: Links mit `class="ai-link"`, Codeblöcke mit `ai-code-block`/`ai-copy-button` werden im UI extra behandelt.
 
 Übernimm diese Muster 1:1: Antworte als Agent am Ende immer mit HTML, das vom MarkdownConverter weiter formatiert wird. Dieses Dokument gehört zum Projekt ClaimPilot.
