@@ -6,14 +6,22 @@
   "scripts": {
     "start": "cds-serve",
     "watch": "cds watch",
+    "watch:hybrid": "cds watch --profile hybrid --port 9999",
+    "watch:autoport": "cds watch --profile hybrid --port 0",
     "watch-claims": "cds watch --open claims/webapp/index.html?sap-ui-xx-viewCache=false"
   },
   "dependencies": {
-    "@sap/cds": "^8.9.4",
-    "express": "^4.19.2",
+    "@langchain/openai": "^0.2.7",
+    "@sap-ai-sdk/langchain": "^1.14.0",
     "@sap-cloud-sdk/connectivity": "^3",
     "@sap-cloud-sdk/http-client": "^3",
-    "@sap-cloud-sdk/resilience": "^3"
+    "@sap-cloud-sdk/resilience": "^3",
+    "@sap/cds": "^8.9.4",
+    "dotenv": "^16.6.1",
+    "express": "^4.19.2",
+    "langchain": "^0.2.18",
+    "openai": "^4.57.0",
+    "voca": "^1.4.1"
   },
   "devDependencies": {
     "@sap/cds-dk": "^8.9.4",
@@ -29,6 +37,10 @@
         "credentials": {
           "database": "sqlite.db"
         }
+      },
+      "gen": {
+        "kind": "odata",
+        "model": "srv/external/gen"
       }
     },
     "server": {
