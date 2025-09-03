@@ -56,6 +56,53 @@ sap.ui.define([
       const ctx = op.getBoundContext();
       const result = ctx.getObject();
       return (result && result.response) || "<i>Keine Antwort</i>";
+    },
+
+    sendViaStreaming: async function (prompt) {
+      const url = "/ai/stream";
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt })
+      });
+      if (!resp.ok || !resp.body) throw new Error("Streaming Response not OK");
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let accumulated = "";
+
+      // ensure last assistant placeholder exists
+      const history = this.chatModel.getProperty("/chatHistory");
+      if (!history.length || history[history.length - 1].type !== "assistant") {
+        this.addMessage("assistant", "<i>Thinking...</i>");
+      }
+
+      const updateAssistant = (text) => {
+        const h = this.chatModel.getProperty("/chatHistory");
+        h[h.length - 1] = { type: "assistant", text };
+        this.chatModel.setProperty("/chatHistory", h);
+        this.chatModel.refresh(true);
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+          const raw = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 2);
+          if (!raw) continue;
+          if (raw.startsWith("data:")) {
+            const data = raw.slice(5).trimStart();
+            if (data === "[DONE]") { reader.cancel(); break; }
+            accumulated += data;
+            updateAssistant(accumulated);
+          }
+        }
+      }
+      return accumulated || "<i>Keine Antwort</i>";
     }
   };
 
@@ -67,7 +114,12 @@ sap.ui.define([
       chatManager.addMessage("user", text);
       chatManager.addMessage("assistant", "<i>Thinking...</i>");
       try {
-        const resp = await chatManager.sendViaODataAction(text);
+        let resp;
+        try {
+          resp = await chatManager.sendViaStreaming(text);
+        } catch (e) {
+          resp = await chatManager.sendViaODataAction(text);
+        }
         // replace last thinking message
         const history = chatManager.chatModel.getProperty("/chatHistory");
         history.pop();
