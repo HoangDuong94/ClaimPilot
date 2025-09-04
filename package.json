@@ -8,7 +8,9 @@
     "watch": "cds watch",
     "watch:hybrid": "cds watch --profile hybrid --port 9999",
     "watch:autoport": "cds watch --profile hybrid --port 0",
-    "watch-claims": "cds watch --open claims/webapp/index.html?sap-ui-xx-viewCache=false"
+    "watch-claims": "cds watch --open claims/webapp/index.html?sap-ui-xx-viewCache=false",
+    "test:chat": "node scripts/test-chat.js",
+    "test:chat:raw": "node scripts/sse-debug.js"
   },
   "dependencies": {
     "@langchain/openai": "^0.2.7",

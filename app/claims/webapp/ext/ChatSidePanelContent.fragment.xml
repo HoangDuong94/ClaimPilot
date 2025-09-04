@@ -7,10 +7,29 @@
     <VBox width="100%" height="100%" class="cpChatSidePanel" renderType="Bare">
         <Toolbar>
             <Title text="PureAI"/>
+            <ToolbarSpacer/>
+            <Button
+                icon="sap-icon://stop"
+                type="Transparent"
+                tooltip="Streaming stoppen"
+                visible="{chat>/isStreaming}"
+                press="onStopStreaming"/>
         </Toolbar>
 
+        <!-- Suggestions (visible when not streaming and initial state) -->
+        <HBox
+            width="100%"
+            visible="{chat>/showSuggestions}"
+            class="cp-suggestions"
+            wrap="Wrap"
+            items="{chat>/suggestions}">
+            <items>
+                <Button text="{chat>text}" type="Default" press="onSuggestionPress" class="cp-suggestion-btn"/>
+            </items>
+        </HBox>
+
         <ScrollContainer id="chatHistoryScrollContainerInSidePanel" width="100%" height="100%" vertical="true">
-            <VBox width="100%">
+            <VBox width="100%" class="cp-chat-container">
                 <List
                     id="chatHistoryList"
                     items="{chat>/chatHistory}"
@@ -18,7 +37,7 @@
                     inset="false"
                     showSeparators="None">
                     <CustomListItem>
-                        <HBox width="100%" justifyContent="{= ${chat>type} === 'user' ? 'End' : 'Start'}">
+                        <HBox width="100%" justifyContent="{= ${chat>type} === 'user' ? 'End' : 'Start'}" alignItems="Stretch">
                             <FormattedText
                                 htmlText="{chat>text}"
                                 class="{= ${chat>type} === 'user' ? 'cp-bubble cp-user' : 'cp-bubble cp-assistant'}"/>
@@ -43,6 +62,7 @@
                 id="sendButton"
                 icon="sap-icon://paper-plane"
                 type="Emphasized"
+                enabled="{= !${chat>/isStreaming} }"
                 press="onSendChatMessageInSidePanel"/>
         </HBox>
     </VBox>

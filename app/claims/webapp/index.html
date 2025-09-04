@@ -13,6 +13,25 @@
         body {
             padding-right: 440px;
         }
+        /* Container and layout */
+        .cp-chat-container { max-width: 42rem; margin: 0 auto; padding: 0 12px; }
+        /* Chat bubble styles */
+        .cp-bubble { display: inline-block; max-width: 38rem; padding: 0.6rem 0.8rem; border-radius: 0.75rem; word-wrap: break-word; margin: 6px 8px; line-height: 1.5; }
+        .cp-user { background: var(--sapSelectedColor, #e9f0ff); color: var(--sapTextColor, #1b1f24); }
+        .cp-assistant { background: var(--sapGroup_ContentBackground, #fafbfc); border: 1px solid var(--sapGroup_ContentBorderColor, #e5e7eb); }
+        .cp-bubble-wrapper { max-width: 100%; }
+        .cp-bubble-actions { display:none; }
+        .cp-avatar { display:none; }
+        .cp-suggestions { max-width: 42rem; margin: .25rem auto; padding: .5rem 12px; display: flex; gap: .5rem; }
+        .cp-suggestion-btn { border-radius: 999px; background: #f3f4f6; border: 1px solid #e5e7eb; padding: .25rem .6rem; font-weight: 500; }
+        /* Markdown/code rendering inside bubbles */
+        .cp-bubble pre { background: #f7f7f9; padding: 0.625rem; border-radius: 0.5rem; overflow: auto; margin: .5rem 0; }
+        .cp-bubble code { background: #f2f2f3; padding: 0.1rem 0.25rem; border-radius: 0.25rem; }
+        .cp-bubble p { margin: 0.3rem 0; }
+        .cp-bubble h1, .cp-bubble h2, .cp-bubble h3 { margin: 0.25rem 0; font-weight: 600; }
+        .cp-bubble h1 { font-size: 1.125rem; }
+        .cp-bubble h2 { font-size: 1.0625rem; }
+        .cp-bubble h3 { font-size: 1rem; }
     </style>
     <script
         id="sap-ui-bootstrap"
