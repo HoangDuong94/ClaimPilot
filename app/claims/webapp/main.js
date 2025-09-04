@@ -20,7 +20,9 @@ sap.ui.define([
     _currentAbortController: null,
 
     // Render a safe, readable HTML from LLM markdown/plain responses
-    renderMarkdownToHtml: function (input) {
+    // opts: { autoParagraphMode: 'fallback' | 'never' }
+    renderMarkdownToHtml: function (input, opts) {
+      const autoParagraphMode = (opts && opts.autoParagraphMode) || 'fallback';
       const escapeHtml = (s) => String(s)
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
@@ -42,11 +44,55 @@ sap.ui.define([
         return `[[[CODE_BLOCK_${idx}]]]`;
       });
 
+      // Pre-escape normalization to honor real paragraph cues
+      // 1) Inline horizontal rule markers like ":---" → add newlines around
+      src = src.replace(/\s*---\s*/g, '\n---\n');
+      // 2) New paragraph when a sentence ends followed by a German opening quote „
+      src = src.replace(/([\.!?])\s*„/g, '$1\n\n„');
+
+      // Normalize before escaping: promote single newline after sentence end to paragraph (fallback mode only)
+      if (autoParagraphMode !== 'never') {
+        src = src.replace(/([\.!?])\n(\s*[A-ZÄÖÜ0-9])/g, '$1\n\n$2');
+      }
+
+      // Heuristic auto-paragraphing for long plain text (no existing paragraphs/lists)
+      const autoParagraph = (text) => {
+        if (/\n\n/.test(text)) return text;
+        if (/(^|\n)\s*(?:[-*]\s+|\d+[\.)]\s+)/m.test(text)) return text; // skip if list markers present
+        let out = '';
+        let i = 0;
+        let sentencesInPara = 0;
+        let paraStartLen = 0;
+        const isUpper = (ch) => /[A-ZÄÖÜ]/.test(ch || '');
+        while (i < text.length) {
+          const ch = text[i];
+          out += ch;
+          if (ch === '.' || ch === '!' || ch === '?') {
+            // collect following whitespace
+            let j = i + 1; let ws = '';
+            while (j < text.length && /\s/.test(text[j])) { ws += text[j]; j++; }
+            const next = text[j];
+            if (isUpper(next)) {
+              sentencesInPara++;
+              const paraLen = out.length - paraStartLen;
+              const insertBreak = sentencesInPara >= 3 || paraLen >= 240;
+              out += insertBreak ? "\n\n" : " ";
+              if (insertBreak) { sentencesInPara = 0; paraStartLen = out.length; }
+              i = j; // skip consumed whitespace
+              continue;
+            }
+          }
+          i++;
+        }
+        return out;
+      };
+
+      if (autoParagraphMode !== 'never') {
+        src = autoParagraph(src);
+      }
+
       // Escape remaining HTML
       let html = escapeHtml(src);
-
-      // Normalize: if a single newline follows a sentence end and starts a new sentence, promote to paragraph
-      src = src.replace(/([\.!?])\n(\s*[A-ZÄÖÜ0-9])/g, '$1\n\n$2');
 
       // Horizontal rule markers
       html = html.replace(/(^|\n)\s*[-*_]{3,}\s*(?=\n|$)/g, '$1<hr/>');
@@ -54,8 +100,10 @@ sap.ui.define([
       // Inline code
       html = html.replace(/`([^`]+)`/g, (m, c) => `<code>${c}</code>`);
 
-      // Basic bold (**text**)
-      html = html.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+      // Basic bold (**text**) → use <strong>
+      html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      // Basic italic with underscores _text_
+      html = html.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1<em>$2</em>');
 
       // Insert line breaks before inline-numbered bullets like ":1. ", ".2. " when not at start of line
       html = html.replace(/([:\.\)!\]])(\s*)(\d+\.\s+)/g, '$1\n$3');
@@ -70,23 +118,78 @@ sap.ui.define([
       html = html.replace(/(^|\n)##\s+(.+?)(?=\n|$)/g, '$1<h2>$2<\/h2>');
       html = html.replace(/(^|\n)#\s+(.+?)(?=\n|$)/g, '$1<h1>$2<\/h1>');
 
-      // Simple list/line formatting: convert bullet markers to readable lines; avoid <ul>/<ol> for FormattedText compatibility
+      // Linkify URLs
+      html = html.replace(/(https?:\/\/[^\s<]+[^<\.,:;"')\]\s])/g, '<a href="$1" target="_blank" rel="noreferrer noopener">$1</a>');
+
+      // Ensure bold headings are visually separated when jammed inline (strong)
+      html = html.replace(/([:\.\!\?])\s*<strong>/g, '$1<br/><br/><strong>');
+      html = html.replace(/<\/strong>(\S)/g, '</strong><br/><br/>$1');
+
+      // Line formatting: group consecutive bullets and quotes into readable blocks; avoid <ul>/<ol>
       const lineify = (text) => {
         const lines = text.split(/\n/);
         const out = [];
-        for (let line of lines) {
+        let list = [];
+        let quote = [];
+        const flushList = () => {
+          if (!list.length) return;
+          const body = list.join('<br/>');
+          out.push(`<p>${body}</p>`);
+          list = [];
+        };
+        const flushQuote = () => {
+          if (!quote.length) return;
+          const body = quote.join('<br/>');
+          out.push(`<blockquote>${body}</blockquote>`);
+          quote = [];
+        };
+        for (let raw of lines) {
+          const line = raw; // already escaped
           if (/^\s*-\s+/.test(line)) {
-            line = '• ' + line.replace(/^\s*-\s+/, '');
+            flushQuote();
+            const content = line.replace(/^\s*-\s+/, '');
+            list.push(`• ${content}`);
+            continue;
           }
-          // Keep numbered bullets as-is
-          out.push(line);
+          if (/^\s*\d+[\.)]\s+/.test(line)) {
+            flushQuote();
+            list.push(`${line.trim()}`);
+            continue;
+          }
+          if (/^\s*>\s+/.test(line)) {
+            flushList();
+            const content = line.replace(/^\s*>\s+/, '');
+            quote.push(content);
+            continue;
+          }
+          // non-bullet/quote line
+          flushList(); flushQuote();
+          if (line.trim() === '') {
+            out.push(''); // will become paragraph gap
+          } else {
+            const trimmed = line.trim();
+            if (trimmed === '<hr/>' || /^<h[1-6][^>]*>.*<\/h[1-6]>$/.test(trimmed)) {
+              out.push(trimmed);
+            } else {
+              out.push(`<p>${line}</p>`);
+            }
+          }
         }
-        return out.join('\n');
+        flushList(); flushQuote();
+        return out.join('');
       };
       html = lineify(html);
 
-      // Line breaks for readability; avoid wrapping in <p> to ensure compatibility
-      html = html.replace(/\n/g, '<br/>');
+      // Line breaks: only apply if keine Block-Tags vorhanden (sonst entfernen)
+      if (!/(<p|<blockquote|<hr\/?|<h[1-6])/i.test(html)) {
+        html = html.replace(/\n\n+/g, '<br/><br/>' );
+        html = html.replace(/\n/g, '<br/>' );
+      } else {
+        html = html.replace(/\n+/g, '');
+      }
+
+      // Post-process: if a paragraph begins with a strong title followed by two <br/>, split into separate paragraphs
+      html = html.replace(/<p><strong>([^<]+)<\/strong><br\/><br\/>/g, '<p><strong>$1<\/strong><\/p><p>');
 
       // Restore fenced code blocks (escaped inside)
       html = html.replace(/\[\[\[CODE_BLOCK_(\d+)\]\]\]/g, (m, i) => {
@@ -119,7 +222,9 @@ sap.ui.define([
 
     addMessage: function (type, text) {
       const history = this.chatModel.getProperty("/chatHistory");
-      history.push({ type, text });
+      const prev = history[history.length - 1];
+      const groupStart = !prev || prev.type !== type;
+      history.push({ type, text, groupStart });
       this.chatModel.setProperty("/chatHistory", history);
       this.chatModel.refresh(true);
       setTimeout(function () {
@@ -166,6 +271,41 @@ sap.ui.define([
       const decoder = new TextDecoder();
       let buf = "";
       let accumulated = "";
+      // Deep-Chat-inspired streaming: partial paragraph rendering + throttle
+      let lastParaBoundary = 0; // index in accumulated where the last completed paragraph ends (points to first char after boundary)
+      let renderedPrefixHtml = ""; // cached HTML for completed paragraphs
+      let scheduled = false;
+      let pendingUpdate = false;
+
+      const scheduleRender = () => {
+        if (scheduled) { pendingUpdate = true; return; }
+        scheduled = true;
+        setTimeout(() => {
+          try {
+            // finalize any newly completed paragraphs since lastParaBoundary
+            // treat double newline as paragraph boundary
+            const boundaryRegex = /\n\n+/g;
+            boundaryRegex.lastIndex = lastParaBoundary;
+            let match;
+            while ((match = boundaryRegex.exec(accumulated)) !== null) {
+              const para = accumulated.slice(lastParaBoundary, match.index);
+              if (para) {
+                renderedPrefixHtml += this.renderMarkdownToHtml(para, { autoParagraphMode: 'never' }) + '<br/><br/>';
+              } else {
+                renderedPrefixHtml += '<br/><br/>';
+              }
+              lastParaBoundary = match.index + match[0].length;
+            }
+            const tail = accumulated.slice(lastParaBoundary);
+            const tailHtml = this.renderMarkdownToHtml(tail, { autoParagraphMode: 'never' });
+            const html = renderedPrefixHtml + tailHtml;
+            updateAssistant(html);
+          } finally {
+            scheduled = false;
+            if (pendingUpdate) { pendingUpdate = false; scheduleRender(); }
+          }
+        }, 40); // ~25 FPS
+      };
 
       // ensure last assistant placeholder exists
       const history = this.chatModel.getProperty("/chatHistory");
@@ -229,11 +369,27 @@ sap.ui.define([
             // Apply streaming bullet normalization heuristics
             piece = normalizeBulletsStreaming(accumulated, piece);
             accumulated += (piece === "" ? "\n" : piece);
-            updateAssistant(accumulated);
+            scheduleRender();
           }
         }
       }
-        return { html: this.renderMarkdownToHtml(accumulated), text: accumulated };
+        // finalize full render once stream completes
+        // flush any remaining cached paragraphs and tail
+        // recompute to be safe
+        renderedPrefixHtml = ""; lastParaBoundary = 0;
+        const boundaryRegex = /\n\n+/g;
+        let match;
+        while ((match = boundaryRegex.exec(accumulated)) !== null) {
+          const para = accumulated.slice(lastParaBoundary, match.index);
+          renderedPrefixHtml += this.renderMarkdownToHtml(para, { autoParagraphMode: 'never' }) + '<br/><br/>';
+          lastParaBoundary = match.index + match[0].length;
+        }
+        const tail = accumulated.slice(lastParaBoundary);
+        const tailHtml = boundaryRegex.test(accumulated)
+          ? this.renderMarkdownToHtml(tail, { autoParagraphMode: 'never' })
+          : this.renderMarkdownToHtml(tail, { autoParagraphMode: 'fallback' });
+        const finalHtml = renderedPrefixHtml + tailHtml;
+        return { html: finalHtml, text: accumulated };
       } finally {
         this.chatModel.setProperty("/isStreaming", false);
         this.chatModel.setProperty("/showSuggestions", false);
@@ -271,13 +427,14 @@ sap.ui.define([
         const finalHtml = (usedStreaming && resp && resp.html)
           ? resp.html
           : chatManager.renderMarkdownToHtml(resp);
-        history.push({ type: "assistant", text: finalHtml });
+        // We just removed an assistant placeholder, so this is not a new group
+        history.push({ type: "assistant", text: finalHtml, groupStart: false });
         chatManager.chatModel.setProperty("/chatHistory", history);
         chatManager.chatModel.refresh(true);
       } catch (e) {
         const history = chatManager.chatModel.getProperty("/chatHistory");
         history.pop();
-        history.push({ type: "assistant", text: "<b>Fehler:</b> " + (e && e.message || e) });
+        history.push({ type: "assistant", text: "<b>Fehler:</b> " + (e && e.message || e), groupStart: false });
         chatManager.chatModel.setProperty("/chatHistory", history);
         chatManager.chatModel.refresh(true);
       }

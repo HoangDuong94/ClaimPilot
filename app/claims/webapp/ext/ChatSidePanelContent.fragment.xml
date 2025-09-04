@@ -37,25 +37,25 @@
                     inset="false"
                     showSeparators="None">
                     <CustomListItem>
-                        <HBox width="100%" justifyContent="{= ${chat>type} === 'user' ? 'End' : 'Start'}" alignItems="Start" class="cp-bubble-wrapper">
-                            <VBox>
-                                <HBox class="cp-meta" alignItems="Center" renderType="Bare">
-                                    <core:Icon src="{= ${chat>type} === 'user' ? 'sap-icon://person-placeholder' : 'sap-icon://machine'}" class="cp-avatar"/>
-                                    <Text text="{= ${chat>type} === 'user' ? 'Du' : 'PureAI'}" class="cp-chip"/>
-                                </HBox>
-                                <HBox alignItems="Start" renderType="Bare">
-                                    <FormattedText
-                                        htmlText="{chat>text}"
-                                        class="{= ${chat>type} === 'user' ? 'cp-bubble cp-user' : 'cp-bubble cp-assistant'}"/>
-                                    <Button
-                                        icon="sap-icon://copy"
-                                        type="Transparent"
-                                        tooltip="Text kopieren"
-                                        visible="{= ${chat>type} !== 'user' }"
-                                        press="onCopyMessage"
-                                        class="cp-bubble-actions"/>
-                                </HBox>
+                        <HBox width="100%"
+                             justifyContent="{= ${chat>type} === 'user' ? 'End' : 'Start'}"
+                             alignItems="Start"
+                             class="{= ${chat>groupStart} ? 'cp-bubble-wrapper cp-group-start' : 'cp-bubble-wrapper'}">
+                            <!-- User bubble (fixed classes) -->
+                            <VBox class="cp-bubble cp-user" renderType="Bare" visible="{= ${chat>type} === 'user' }">
+                                <FormattedText htmlText="{chat>text}"/>
                             </VBox>
+                            <!-- Assistant bubble (fixed classes) -->
+                            <VBox class="cp-bubble cp-assistant" renderType="Bare" visible="{= ${chat>type} !== 'user' }">
+                                <FormattedText htmlText="{chat>text}"/>
+                            </VBox>
+                            <Button
+                                icon="sap-icon://copy"
+                                type="Transparent"
+                                tooltip="Text kopieren"
+                                visible="{= ${chat>type} !== 'user' }"
+                                press="onCopyMessage"
+                                class="cp-bubble-actions"/>
                         </HBox>
                     </CustomListItem>
                 </List>

@@ -1302,3 +1302,121 @@ SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 
 [cds] - server launched in: 690.379ms
 [cds] - [ terminate with ^C ]
 
+[33m
+[1m        ___________________________
+ [0m
+
+[cds] - imported API to srv\external\gen
+> use it in your CDS models through the like of:
+
+using { gen as external } from './external/gen'
+
+[cds] - loading server from { file: 'srv\\server.js' }
+[cds] - loaded model from 8 file(s):
+
+  srv\fe-annotations.cds
+  srv\external\gen.csn
+  srv\claim-flat.cds
+  app\services.cds
+  app\claims\annotations.cds
+  srv\service.cds
+  db\schema.cds
+  node_modules\@sap\cds\common.cds
+[cds] - connect using bindings from: { registry: '~/.cds-services.json' }
+[cds] - connect to db > sqlite { url: 'db.sqlite', database: 'sqlite.db' }
+[cds] - using auth strategy {
+  kind: 'mocked',
+  impl: 'node_modules\\@sap\\cds\\lib\\srv\\middlewares\\auth\\basic-auth'
+} 
+
+[cds] - serving KfzService { impl: 'srv\\service.js', path: '/service/kfz' }
+[cds] - mocking gen {
+  impl: 'node_modules\\@sap\\cds\\libx\\_runtime\\common\\Service.js',
+  path: '/odata/v4/gen'
+}
+
+[cds] - server listening on { url: 'http://localhost:9999' }
+[cds] - server launched in: 730.611ms
+[cds] - [ terminate with ^C ]
+
+[33m
+[1m        ___________________________
+ [0m
+[cds] - loading server from { file: 'srv\\server.js' }
+[cds] - loaded model from 8 file(s):
+
+  srv\fe-annotations.cds
+  srv\external\gen.csn
+  srv\claim-flat.cds
+  app\services.cds
+  app\claims\annotations.cds
+  srv\service.cds
+  db\schema.cds
+  node_modules\@sap\cds\common.cds
+[cds] - connect using bindings from: { registry: '~/.cds-services.json' }
+[cds] - connect to db > sqlite { url: 'db.sqlite', database: 'sqlite.db' }
+[cds] - using auth strategy {
+  kind: 'mocked',
+  impl: 'node_modules\\@sap\\cds\\lib\\srv\\middlewares\\auth\\basic-auth'
+} 
+
+[cds] - serving KfzService { impl: 'srv\\service.js', path: '/service/kfz' }
+
+[cds] - server listening on { url: 'http://localhost:9999' }
+[cds] - server launched in: 706.301ms
+[cds] - [ terminate with ^C ]
+
+[33m
+[1m        ___________________________
+ [0m
+[cds] - loading server from { file: 'srv\\server.js' }
+[cds] - loaded model from 8 file(s):
+
+  srv\fe-annotations.cds
+  srv\external\gen.csn
+  srv\claim-flat.cds
+  app\services.cds
+  app\claims\annotations.cds
+  srv\service.cds
+  db\schema.cds
+  node_modules\@sap\cds\common.cds
+[cds] - connect using bindings from: { registry: '~/.cds-services.json' }
+[cds] - connect to db > sqlite { url: 'db.sqlite', database: 'sqlite.db' }
+[cds] - using auth strategy {
+  kind: 'mocked',
+  impl: 'node_modules\\@sap\\cds\\lib\\srv\\middlewares\\auth\\basic-auth'
+} 
+
+[cds] - serving KfzService { impl: 'srv\\service.js', path: '/service/kfz' }
+
+[cds] - server listening on { url: 'http://localhost:9999' }
+[cds] - server launched in: 727.841ms
+[cds] - [ terminate with ^C ]
+
+[33m
+[1m        ___________________________
+ [0m
+[cds] - loading server from { file: 'srv\\server.js' }
+[cds] - loaded model from 8 file(s):
+
+  srv\fe-annotations.cds
+  srv\external\gen.csn
+  srv\claim-flat.cds
+  app\services.cds
+  app\claims\annotations.cds
+  srv\service.cds
+  db\schema.cds
+  node_modules\@sap\cds\common.cds
+[cds] - connect using bindings from: { registry: '~/.cds-services.json' }
+[cds] - connect to db > sqlite { url: 'db.sqlite', database: 'sqlite.db' }
+[cds] - using auth strategy {
+  kind: 'mocked',
+  impl: 'node_modules\\@sap\\cds\\lib\\srv\\middlewares\\auth\\basic-auth'
+} 
+
+[cds] - serving KfzService { impl: 'srv\\service.js', path: '/service/kfz' }
+
+[cds] - server listening on { url: 'http://localhost:9999' }
+[cds] - server launched in: 704.408ms
+[cds] - [ terminate with ^C ]
+
