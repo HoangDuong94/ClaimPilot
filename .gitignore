@@ -21,3 +21,7 @@ Thumbs.db
 
 # added by cds
 .cdsrc-private.json
+ 
+# Logs
+server.log
+*.log

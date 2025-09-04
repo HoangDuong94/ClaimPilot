@@ -1,0 +1,16 @@
+<core:FragmentDefinition
+    xmlns="sap.m"
+    xmlns:core="sap.ui.core">
+
+    <VBox width="100%" height="100%" class="cpChatSidePanel" renderType="Bare">
+        <Toolbar>
+            <Title text="PureAI"/>
+            <ToolbarSpacer/>
+        </Toolbar>
+        <!-- Platzhalter; echtes Deep Chat wird programmatisch in main.js erzeugt -->
+        <VBox width="100%" height="100%" justifyContent="Center" alignItems="Center">
+            <Text text="Chat lädt…"/>
+        </VBox>
+    </VBox>
+
+</core:FragmentDefinition>
