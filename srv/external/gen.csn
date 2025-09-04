@@ -156,7 +156,7 @@
      "cardinality": {
       "max": 1
      },
-     "keys": []
+     "keys": [ { "ref": [ "ID" ], "as": "insured_ID" } ]
     },
     "insured_ID": {
      "type": "cds.UUID"
@@ -318,7 +318,7 @@
      "cardinality": {
       "max": 1
      },
-     "keys": []
+     "keys": [ { "ref": [ "ID" ], "as": "policy_ID" } ]
     },
     "policy_ID": {
      "type": "cds.UUID"
@@ -329,7 +329,7 @@
      "cardinality": {
       "max": 1
      },
-     "keys": []
+     "keys": [ { "ref": [ "ID" ], "as": "vehicle_ID" } ]
     },
     "vehicle_ID": {
      "type": "cds.UUID"
@@ -339,24 +339,19 @@
      "target": "gen.Email",
      "cardinality": {
       "max": "*"
-     },
-     "keys": []
+     }
     },
     "documents": {
      "type": "cds.Composition",
      "target": "gen.Document",
-     "cardinality": {
-      "max": "*"
-     },
-     "keys": []
+     "cardinality": { "max": "*" }
     },
     "tasks": {
      "type": "cds.Composition",
      "target": "gen.Task",
      "cardinality": {
       "max": "*"
-     },
-     "keys": []
+     }
     },
     "policyNumber": {
      "type": "cds.String",
@@ -443,7 +438,7 @@
      "cardinality": {
       "max": 1
      },
-     "keys": []
+     "keys": [ { "ref": [ "ID" ], "as": "claim_ID" } ]
     },
     "claim_ID": {
      "type": "cds.UUID"
@@ -521,7 +516,7 @@
      "cardinality": {
       "max": 1
      },
-     "keys": []
+     "keys": [ { "ref": [ "ID" ], "as": "claim_ID" } ]
     },
     "claim_ID": {
      "type": "cds.UUID"
@@ -598,7 +593,7 @@
      "cardinality": {
       "max": 1
      },
-     "keys": []
+     "keys": [ { "ref": [ "ID" ], "as": "claim_ID" } ]
     },
     "claim_ID": {
      "type": "cds.UUID"
@@ -620,3 +615,4 @@
   }
  }
 }
+

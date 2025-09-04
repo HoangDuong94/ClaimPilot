@@ -13,6 +13,10 @@
     "test:chat:raw": "node scripts/sse-debug.js"
   },
   "dependencies": {
+    "@langchain/core": "^0.3.72",
+    "@modelcontextprotocol/sdk": "^1.11.0",
+    "@langchain/mcp-adapters": "^0.5.2",
+    "@langchain/langgraph": "^0.3.2",
     "@langchain/openai": "^0.2.7",
     "@sap-ai-sdk/langchain": "^1.14.0",
     "@sap-cloud-sdk/connectivity": "^3",
@@ -21,7 +25,7 @@
     "@sap/cds": "^8.9.4",
     "dotenv": "^16.6.1",
     "express": "^4.19.2",
-    "langchain": "^0.2.18",
+    "langchain": "^0.3.32",
     "openai": "^4.57.0",
     "voca": "^1.4.1"
   },

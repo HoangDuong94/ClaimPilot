@@ -560,8 +560,7 @@ sap.ui.define([
           el.removeAttribute('demo');
           const connectHandler = async function(reqBody, signals) {
             try {
-              signals.onOpen();
-              // Build conversation history similar to Repomix: include full chat context
+              // Build conversation history from component state
               let history = [];
               try {
                 if (typeof el.getMessages === 'function') {
@@ -576,9 +575,9 @@ sap.ui.define([
                 history.push({ role: 'user', text: reqBody.text, html: reqBody.html, content: reqBody.content });
               }
 
-              const resp = await fetch('/ai/formatFromAI', {
+              const resp = await fetch('/ai/agent', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                 body: JSON.stringify({ messages: history })
               });
               if (!resp.ok) {
@@ -587,6 +586,7 @@ sap.ui.define([
                 return;
               }
               const payload = await resp.json().catch(() => ({}));
+              signals.onOpen();
               if (payload && payload.html) {
                 signals.onResponse({ html: payload.html });
               } else if (payload && payload.text) {
@@ -601,7 +601,8 @@ sap.ui.define([
             }
           };
           el.connect = {};
-          el.connect.handler = connectHandler; // non-stream; returns final HTML
+          el.connect.handler = connectHandler; // non-stream; server aggregates via stream internally
+          try { el.connect.stream = false; } catch (_) {}
             el.textInput = { styles: { text: { paddingRight: '64px' } }, placeholder: { text: ' ' } };
             el.submitButtonStyles = { alwaysEnabled: true };
             // Preserve line breaks inside AI/user bubbles so bullets and paragraphs render
