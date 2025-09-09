@@ -202,13 +202,13 @@ sap.ui.define([
     initModel: function () {
       this.chatModel = new JSONModel({
         chatHistory: [
-          { type: "assistant", text: "<i>Willkommen! Wie kann ich helfen?</i>" }
+          // initial welcome message removed
         ],
         userInput: "",
         isTyping: false,
         isStreaming: false,
         statusMessage: "",
-        showSuggestions: true,
+        showSuggestions: false,
         suggestions: [
           { text: "Fasse den aktuellen Vorgang zusammen" },
           { text: "Welche fehlenden Unterlagen brauche ich?" },
@@ -312,6 +312,7 @@ sap.ui.define([
       }
 
       const updateAssistant = (html) => {
+        if (html == null || String(html).trim() === "") return;
         const h = this.chatModel.getProperty("/chatHistory");
         h[h.length - 1] = { type: "assistant", text: html };
         this.chatModel.setProperty("/chatHistory", h);
