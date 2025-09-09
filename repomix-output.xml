@@ -1,0 +1,2975 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+.gitignore
+app/claims/package.json
+app/claims/README.md
+app/claims/ui5.yaml
+app/claims/webapp/Component.js
+app/claims/webapp/css/chat.css
+app/claims/webapp/ext/ChatSidePanelContent.fragment.xml
+app/claims/webapp/i18n/i18n.properties
+app/claims/webapp/index.html
+app/claims/webapp/main.js
+app/claims/webapp/main.tmp
+app/claims/webapp/manifest.json
+app/claims/webapp/test/flpSandbox.html
+app/claims/webapp/test/integration/FirstJourney.js
+app/claims/webapp/test/integration/opaTests.qunit.html
+app/claims/webapp/test/integration/opaTests.qunit.js
+app/claims/webapp/test/integration/pages/ClaimList.js
+app/claims/webapp/test/integration/pages/ClaimObjectPage.js
+app/claims/webapp/test/testsuite.qunit.html
+app/claims/webapp/test/testsuite.qunit.js
+db/data/sap.kfz-Claim.csv
+db/data/sap.kfz-Document.csv
+db/data/sap.kfz-Email.csv
+db/data/sap.kfz-Insured.csv
+db/data/sap.kfz-Policy.csv
+db/data/sap.kfz-Task.csv
+db/data/sap.kfz-Vehicle.csv
+db/schema.cds
+package.json
+README.md
+scripts/check-destination.js
+scripts/list-deployments.js
+scripts/sse-debug.js
+scripts/test-bullet-heuristic.js
+scripts/test-chat.js
+scripts/test-render.js
+srv/claim-flat.cds
+srv/fe-annotations.cds
+srv/server.js
+srv/service.cds
+srv/service.js
+tmp_curl_out.txt
+tmp_payload.json
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="app/claims/webapp/main.tmp">
+sap.ui.define([
+  "sap/ui/core/Component",
+  "sap/ui/core/ComponentContainer",
+  "sap/ui/layout/Splitter",
+  "sap/ui/layout/SplitterLayoutData",
+  "sap/ui/core/Fragment",
+  "sap/ui/model/json/JSONModel",
+  "sap/m/App",
+  "sap/m/Page",
+  "sap/m/Panel"
+], function (Component, ComponentContainer, Splitter, SplitterLayoutData, Fragment, JSONModel, App, Page, Panel) {
+  "use strict";
+
+  const chatManager = {
+    chatModel: null,
+    feAppComponentInstance: null,
+    rightPane: null,
+    _currentAbortController: null,
+
+    // Render a safe, readable HTML from LLM markdown/plain responses
+    // opts: { autoParagraphMode: 'fallback' | 'never' }
+    renderMarkdownToHtml: function (input, opts) {
+      const autoParagraphMode = (opts && opts.autoParagraphMode) || 'fallback';
+      const escapeHtml = (s) => String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
+      if (input == null) return "";
+      let src = String(input).replace(/\r\n/g, "\n");
+
+      // Extract fenced code blocks first (```lang\n...```) and ~~~ blocks
+      const blocks = [];
+      src = src.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (m, lang, code) => {
+        const idx = blocks.push({ lang: lang || "", code }) - 1;
+        return `[[[CODE_BLOCK_${idx}]]]`;
+      });
+      src = src.replace(/~~~([a-zA-Z0-9_-]*)\n([\s\S]*?)~~~/g, (m, lang, code) => {
+        const idx = blocks.push({ lang: lang || "", code }) - 1;
+        return `[[[CODE_BLOCK_${idx}]]]`;
+      });
+
+      // Pre-escape normalization to honor real paragraph cues
+      // 1) Inline horizontal rule markers like ":---" → add newlines around
+      src = src.replace(/\s*---\s*/g, '\n---\n');
+      // 2) New paragraph when a sentence ends followed by a German opening quote „
+      src = src.replace(/([\.!?])\s*„/g, '$1\n\n„');
+
+      // Normalize before escaping: promote single newline after sentence end to paragraph (fallback mode only)
+      if (autoParagraphMode !== 'never') {
+        src = src.replace(/([\.!?])\n(\s*[A-ZÄÖÜ0-9])/g, '$1\n\n$2');
+      }
+
+      // Heuristic auto-paragraphing for long plain text (no existing paragraphs/lists)
+      const autoParagraph = (text) => {
+        if (/\n\n/.test(text)) return text;
+        if (/(^|\n)\s*(?:[-*]\s+|\d+[\.)]\s+)/m.test(text)) return text; // skip if list markers present
+        let out = '';
+        let i = 0;
+        let sentencesInPara = 0;
+        let paraStartLen = 0;
+        const isUpper = (ch) => /[A-ZÄÖÜ]/.test(ch || '');
+        while (i < text.length) {
+          const ch = text[i];
+          out += ch;
+          if (ch === '.' || ch === '!' || ch === '?') {
+            // collect following whitespace
+            let j = i + 1; let ws = '';
+            while (j < text.length && /\s/.test(text[j])) { ws += text[j]; j++; }
+            const next = text[j];
+            if (isUpper(next)) {
+              sentencesInPara++;
+              const paraLen = out.length - paraStartLen;
+              const insertBreak = sentencesInPara >= 3 || paraLen >= 240;
+              out += insertBreak ? "\n\n" : " ";
+              if (insertBreak) { sentencesInPara = 0; paraStartLen = out.length; }
+              i = j; // skip consumed whitespace
+              continue;
+            }
+          }
+          i++;
+        }
+        return out;
+      };
+
+      if (autoParagraphMode !== 'never') {
+        src = autoParagraph(src);
+      }
+
+      // Escape remaining HTML
+      let html = escapeHtml(src);
+
+      // Horizontal rule markers
+      html = html.replace(/(^|\n)\s*[-*_]{3,}\s*(?=\n|$)/g, '$1<hr/>');
+
+      // Inline code
+      html = html.replace(/`([^`]+)`/g, (m, c) => `<code>${c}</code>`);
+
+      // Basic bold (**text**) → use <strong>
+      html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      // Basic italic with underscores _text_
+      html = html.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1<em>$2</em>');
+
+      // Insert line breaks before inline-numbered bullets like ":1. ", ".2. " when not at start of line
+      html = html.replace(/([:\.\)!\]])(\s*)(\d+\.\s+)/g, '$1\n$3');
+      // Also before inline hyphen bullets like ":- "
+      html = html.replace(/([:\.\)!\]])(\s*)(-\s+)/g, '$1\n$3');
+
+      // Headings (# ...)
+      html = html.replace(/(^|\n)######\s+(.+?)(?=\n|$)/g, '$1<h6>$2<\/h6>');
+      html = html.replace(/(^|\n)#####\s+(.+?)(?=\n|$)/g, '$1<h5>$2<\/h5>');
+      html = html.replace(/(^|\n)####\s+(.+?)(?=\n|$)/g, '$1<h4>$2<\/h4>');
+      html = html.replace(/(^|\n)###\s+(.+?)(?=\n|$)/g, '$1<h3>$2<\/h3>');
+      html = html.replace(/(^|\n)##\s+(.+?)(?=\n|$)/g, '$1<h2>$2<\/h2>');
+      html = html.replace(/(^|\n)#\s+(.+?)(?=\n|$)/g, '$1<h1>$2<\/h1>');
+
+      // Linkify URLs
+      html = html.replace(/(https?:\/\/[^\s<]+[^<\.,:;"')\]\s])/g, '<a href="$1" target="_blank" rel="noreferrer noopener">$1</a>');
+
+      // Ensure bold headings are visually separated when jammed inline (strong)
+      html = html.replace(/([:\.\!\?])\s*<strong>/g, '$1<br/><br/><strong>');
+      html = html.replace(/<\/strong>(\S)/g, '</strong><br/><br/>$1');
+
+      // Line formatting: group consecutive bullets and quotes into readable blocks; avoid <ul>/<ol>
+      const lineify = (text) => {
+        const lines = text.split(/\n/);
+        const out = [];
+        let list = [];
+        let quote = [];
+        const flushList = () => {
+          if (!list.length) return;
+          const body = list.join('<br/>');
+          out.push(`<p>${body}</p>`);
+          list = [];
+        };
+        const flushQuote = () => {
+          if (!quote.length) return;
+          const body = quote.join('<br/>');
+          out.push(`<blockquote>${body}</blockquote>`);
+          quote = [];
+        };
+        for (let raw of lines) {
+          const line = raw; // already escaped
+          if (/^\s*-\s+/.test(line)) {
+            flushQuote();
+            const content = line.replace(/^\s*-\s+/, '');
+            list.push(`• ${content}`);
+            continue;
+          }
+          if (/^\s*\d+[\.)]\s+/.test(line)) {
+            flushQuote();
+            list.push(`${line.trim()}`);
+            continue;
+          }
+          if (/^\s*>\s+/.test(line)) {
+            flushList();
+            const content = line.replace(/^\s*>\s+/, '');
+            quote.push(content);
+            continue;
+          }
+          // non-bullet/quote line
+          flushList(); flushQuote();
+          if (line.trim() === '') {
+            out.push(''); // will become paragraph gap
+          } else {
+            const trimmed = line.trim();
+            if (trimmed === '<hr/>' || /^<h[1-6][^>]*>.*<\/h[1-6]>$/.test(trimmed)) {
+              out.push(trimmed);
+            } else {
+              out.push(`<p>${line}</p>`);
+            }
+          }
+        }
+        flushList(); flushQuote();
+        return out.join('');
+      };
+      html = lineify(html);
+
+      // Line breaks: only apply if keine Block-Tags vorhanden (sonst entfernen)
+      if (!/(<p|<blockquote|<hr\/?|<h[1-6])/i.test(html)) {
+        html = html.replace(/\n\n+/g, '<br/><br/>' );
+        html = html.replace(/\n/g, '<br/>' );
+      } else {
+        html = html.replace(/\n+/g, '');
+      }
+
+      // Post-process: if a paragraph begins with a strong title followed by two <br/>, split into separate paragraphs
+      html = html.replace(/<p><strong>([^<]+)<\/strong><br\/><br\/>/g, '<p><strong>$1<\/strong><\/p><p>');
+
+      // Restore fenced code blocks (escaped inside)
+      html = html.replace(/\[\[\[CODE_BLOCK_(\d+)\]\]\]/g, (m, i) => {
+        const blk = blocks[Number(i)] || { lang: '', code: '' };
+        const content = escapeHtml(blk.code);
+        return `<pre><code data-lang="${blk.lang}">${content}</code></pre>`;
+      });
+
+      return html;
+    },
+
+    initModel: function () {
+      this.chatModel = new JSONModel({
+        chatHistory: [
+          { type: "assistant", text: "<i>Willkommen! Wie kann ich helfen?</i>" }
+        ],
+        userInput: "",
+        isTyping: false,
+        isStreaming: false,
+        statusMessage: "",
+        showSuggestions: true,
+        suggestions: [
+          { text: "Fasse den aktuellen Vorgang zusammen" },
+          { text: "Welche fehlenden Unterlagen brauche ich?" },
+          { text: "Erzeuge eine Kundenmail" },
+          { text: "Erkläre die Entscheidung" }
+        ]
+      });
+    },
+
+    addMessage: function (type, text) {
+      const history = this.chatModel.getProperty("/chatHistory");
+      const prev = history[history.length - 1];
+      const groupStart = !prev || prev.type !== type;
+      history.push({ type, text, groupStart });
+      this.chatModel.setProperty("/chatHistory", history);
+      this.chatModel.refresh(true);
+      setTimeout(function () {
+        try {
+          const sc = sap.ui.core.Fragment.byId("chatSidePanelFragmentGlobal", "chatHistoryScrollContainerInSidePanel");
+          sc && sc.scrollTo(0, 99999, 200);
+        } catch (e) { /* ignore */ }
+      }, 100);
+    },
+
+    sendViaODataAction: async function (prompt) {
+      if (!this.feAppComponentInstance) {
+        throw new Error("FE Component not available");
+      }
+      const oDataModel = this.feAppComponentInstance.getModel();
+      if (!oDataModel) {
+        throw new Error("OData Model not found");
+      }
+      const op = oDataModel.bindContext("/callLLM(...)");
+      op.setParameter("prompt", prompt);
+      await op.execute();
+      const ctx = op.getBoundContext();
+      const result = ctx.getObject();
+      return (result && result.response) || "<i>Keine Antwort</i>";
+    },
+
+    sendViaStreaming: async function (prompt) {
+      const url = "/ai/stream";
+      const ac = new AbortController();
+      this._currentAbortController = ac;
+      this.chatModel.setProperty("/isStreaming", true);
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+        signal: ac.signal
+      });
+      if (!resp.ok || !resp.body) {
+        this.chatModel.setProperty("/isStreaming", false);
+        throw new Error("Streaming Response not OK");
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let accumulated = "";
+      // Deep-Chat-inspired streaming: partial paragraph rendering + throttle
+      let lastParaBoundary = 0; // index in accumulated where the last completed paragraph ends (points to first char after boundary)
+      let renderedPrefixHtml = ""; // cached HTML for completed paragraphs
+      let scheduled = false;
+      let pendingUpdate = false;
+
+      const scheduleRender = () => {
+        if (scheduled) { pendingUpdate = true; return; }
+        scheduled = true;
+        setTimeout(() => {
+          try {
+            // finalize any newly completed paragraphs since lastParaBoundary
+            // treat double newline as paragraph boundary
+            const boundaryRegex = /\n\n+/g;
+            boundaryRegex.lastIndex = lastParaBoundary;
+            let match;
+            while ((match = boundaryRegex.exec(accumulated)) !== null) {
+              const para = accumulated.slice(lastParaBoundary, match.index);
+              if (para) {
+                renderedPrefixHtml += this.renderMarkdownToHtml(para, { autoParagraphMode: 'never' }) + '<br/><br/>';
+              } else {
+                renderedPrefixHtml += '<br/><br/>';
+              }
+              lastParaBoundary = match.index + match[0].length;
+            }
+            const tail = accumulated.slice(lastParaBoundary);
+            const tailHtml = this.renderMarkdownToHtml(tail, { autoParagraphMode: 'never' });
+            const html = renderedPrefixHtml + tailHtml;
+            updateAssistant(html);
+          } finally {
+            scheduled = false;
+            if (pendingUpdate) { pendingUpdate = false; scheduleRender(); }
+          }
+        }, 40); // ~25 FPS
+      };
+
+      // ensure last assistant placeholder exists
+      const history = this.chatModel.getProperty("/chatHistory");
+      if (!history.length || history[history.length - 1].type !== "assistant") {
+        this.addMessage("assistant", "<i>Thinking...</i>");
+      }
+
+      const updateAssistant = (text) => {
+        const h = this.chatModel.getProperty("/chatHistory");
+        h[h.length - 1] = { type: "assistant", text: this.renderMarkdownToHtml(text) };
+        this.chatModel.setProperty("/chatHistory", h);
+        this.chatModel.refresh(true);
+      };
+
+      // Heuristic: insert missing newlines before bullet markers while streaming
+      const normalizeBulletsStreaming = (prev, chunk) => {
+        if (!chunk) return chunk;
+        let s = String(chunk);
+        // If a new chunk starts with a bullet but the previous text didn't end with a newline, insert one
+        try {
+          if (prev && !/\n$/.test(prev) && /^(\s*)(?:[-*]\s+|\d+\.\s+)/.test(s)) {
+            s = "\n" + s;
+          }
+          // Inside the chunk, add a newline before any bullet marker that's not already at line start
+          // Hyphen bullets only (avoid '*' to not break bold markup like '**text**')
+          s = s.replace(/([^\n])(?=-\s+)/g, '$1\n');
+          // Numbered bullets like "1. "
+          s = s.replace(/([^\n])(?=\d+\.\s+)/g, '$1\n');
+        } catch (e) { /* best-effort; ignore */ }
+        return s;
+      };
+
+      try {
+        while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+          // extract one SSE event (without trimming leading spaces in value)
+          let raw = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          if (!raw) continue;
+          if (raw.startsWith("data:")) {
+            let data = raw.slice(5);
+            // Per SSE spec: ignore a single optional space after the colon
+            if (data.startsWith(" ")) data = data.slice(1);
+            if (data.trim() === "[DONE]") { reader.cancel(); break; }
+            // If server sends JSON chunks, try to extract a content field; otherwise append as-is
+            let toAppend = null;
+            if (data.startsWith("{") || data.startsWith("[")) {
+              try {
+                const obj = JSON.parse(data);
+                toAppend = obj.delta || obj.content || obj.text || null;
+              } catch (e) {
+                toAppend = null;
+              }
+            }
+            // Interpret empty data events as line breaks (common with SSE token streams)
+            let piece = (toAppend != null ? toAppend : data);
+            // Apply streaming bullet normalization heuristics
+            piece = normalizeBulletsStreaming(accumulated, piece);
+            accumulated += (piece === "" ? "\n" : piece);
+            scheduleRender();
+          }
+        }
+      }
+        // finalize full render once stream completes
+        // flush any remaining cached paragraphs and tail
+        // recompute to be safe
+        renderedPrefixHtml = ""; lastParaBoundary = 0;
+        const boundaryRegex = /\n\n+/g;
+        let match;
+        while ((match = boundaryRegex.exec(accumulated)) !== null) {
+          const para = accumulated.slice(lastParaBoundary, match.index);
+          renderedPrefixHtml += this.renderMarkdownToHtml(para, { autoParagraphMode: 'never' }) + '<br/><br/>';
+          lastParaBoundary = match.index + match[0].length;
+        }
+        const tail = accumulated.slice(lastParaBoundary);
+        const tailHtml = boundaryRegex.test(accumulated)
+          ? this.renderMarkdownToHtml(tail, { autoParagraphMode: 'never' })
+          : this.renderMarkdownToHtml(tail, { autoParagraphMode: 'fallback' });
+        const finalHtml = renderedPrefixHtml + tailHtml;
+        return { html: finalHtml, text: accumulated };
+      } finally {
+        this.chatModel.setProperty("/isStreaming", false);
+        this.chatModel.setProperty("/showSuggestions", false);
+        this._currentAbortController = null;
+      }
+    }
+  };
+
+  const chatController = {
+    onSendChatMessageInSidePanel: async function (overrideText) {
+      const text = (overrideText != null ? String(overrideText) : (chatManager.chatModel.getProperty("/userInput") || "")).trim();
+      if (!text) { return; }
+      chatManager.chatModel.setProperty("/userInput", "");
+      // Escape user text for safe HTML display in FormattedText
+      const escapeHtml = (s) => String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+      chatManager.addMessage("user", escapeHtml(text));
+      chatManager.addMessage("assistant", "<i>Thinking...</i>");
+      chatManager.chatModel.setProperty("/showSuggestions", false);
+      try {
+        let resp; let usedStreaming = false;
+        try {
+          resp = await chatManager.sendViaStreaming(text);
+          usedStreaming = true;
+        } catch (e) {
+          resp = await chatManager.sendViaODataAction(text);
+        }
+        // replace last thinking message
+        const history = chatManager.chatModel.getProperty("/chatHistory");
+        history.pop();
+        const finalHtml = (usedStreaming && resp && resp.html)
+          ? resp.html
+          : chatManager.renderMarkdownToHtml(resp);
+        // We just removed an assistant placeholder, so this is not a new group
+        history.push({ type: "assistant", text: finalHtml, groupStart: false });
+        chatManager.chatModel.setProperty("/chatHistory", history);
+        chatManager.chatModel.refresh(true);
+      } catch (e) {
+        const history = chatManager.chatModel.getProperty("/chatHistory");
+        history.pop();
+        history.push({ type: "assistant", text: "<b>Fehler:</b> " + (e && e.message || e), groupStart: false });
+        chatManager.chatModel.setProperty("/chatHistory", history);
+        chatManager.chatModel.refresh(true);
+      }
+    },
+
+    onStopStreaming: function () {
+      try {
+        if (chatManager._currentAbortController) {
+          chatManager._currentAbortController.abort();
+        }
+      } catch (e) { /* ignore */ }
+    },
+
+    onCopyMessage: function (oEvent) {
+      try {
+        const ctx = oEvent.getSource().getBindingContext("chat");
+        const text = ctx && ctx.getProperty("text");
+        if (!text) return;
+        const tmp = document.createElement("textarea");
+        tmp.value = text.replace(/<[^>]+>/g, "");
+        document.body.appendChild(tmp);
+        tmp.select();
+        document.execCommand("copy");
+        document.body.removeChild(tmp);
+      } catch (e) { /* ignore */ }
+    },
+
+    onRetryMessage: function (oEvent) {
+      try {
+        const ctx = oEvent.getSource().getBindingContext("chat");
+        const text = ctx && ctx.getProperty("text");
+        if (text) {
+          this.onSendChatMessageInSidePanel(text);
+        }
+      } catch (e) { /* ignore */ }
+    },
+
+    onSuggestionPress: function (oEvent) {
+      const s = oEvent.getSource().getText();
+      chatManager.chatModel.setProperty("/showSuggestions", false);
+      this.onSendChatMessageInSidePanel(s);
+    }
+  };
+
+  async function init() {
+    // Prepare model
+    chatManager.initModel();
+
+    // Load chat panel fragment
+    const chatPanelContent = await Fragment.load({
+      id: "chatSidePanelFragmentGlobal",
+      name: "de.claimpilot.claims.ext.ChatSidePanelContent",
+      controller: chatController
+    });
+
+    // Enable Enter-to-send on the TextArea; ensure latest value is in the model before sending
+    try {
+      const input = sap.ui.core.Fragment.byId("chatSidePanelFragmentGlobal", "chatInputField");
+      if (input && input.attachBrowserEvent) {
+        input.attachBrowserEvent("keydown", function (ev) {
+          if (ev.key === "Enter" && !ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+            ev.preventDefault();
+            try {
+              const val = input.getValue();
+              // Write to bound model first so getProperty sees the latest
+              chatManager.chatModel.setProperty("/userInput", val);
+              // Also trigger the control's change lifecycle for consistency
+              if (typeof input.fireChange === 'function') input.fireChange({ value: val });
+              // Send using the captured value to avoid any race
+              chatController.onSendChatMessageInSidePanel(val);
+            } catch (e) { /* ignore */ }
+          }
+        });
+      }
+    } catch (e) { /* ignore */ }
+
+    // Wrap chat content in a Panel to ensure setVisible and full height
+    const rootContent = Array.isArray(chatPanelContent) ? chatPanelContent[0] : chatPanelContent;
+    chatManager.rightPane = new Panel("chatRightPane", { content: [rootContent], height: "100%" });
+    chatManager.rightPane.setModel(chatManager.chatModel, "chat");
+    chatManager.rightPane.setLayoutData(new SplitterLayoutData({ size: "420px", resizable: true, minSize: 280 }));
+
+    // Create FE component and container (left side)
+    const feComponent = await Component.create({ name: "de.claimpilot.claims", id: "feAppComponentCore" });
+    chatManager.feAppComponentInstance = feComponent;
+    const container = new ComponentContainer({ component: feComponent, height: "100%" });
+
+    // Splitter with two areas: left (FE), right (Chat)
+    const splitter = new Splitter("mainSplitter", { height: "100%" });
+    splitter.addContentArea(container);
+    splitter.addContentArea(chatManager.rightPane);
+
+    // Wire dependencies for FE component (provide chat model and pane)
+    if (feComponent.setExternalDependencies) {
+      feComponent.setExternalDependencies(chatManager.chatModel, chatManager.rightPane);
+    }
+
+    // Mount app
+    const page = new Page("mainAppPage", { showHeader: false, content: [splitter], height: "100%" });
+    const app = new App({ pages: [page], height: "100%" });
+    app.placeAt("appHost");
+
+    // Expose for other modules if needed
+    try { window.claimpilotChat = { model: chatManager.chatModel, panel: chatManager.rightPane, sendPrompt: chatController.onSendChatMessageInSidePanel.bind(chatController) }; } catch (e) {}
+  }
+
+  return { init };
+});
+</file>
+
+<file path="tmp_curl_out.txt">
+HTTP/1.1 200 OK
+X-Powered-By: Express
+Content-Type: text/event-stream; charset=utf-8
+Cache-Control: no-cache, no-transform
+Connection: keep-alive
+X-Accel-Buffering: no
+Date: Tue, 09 Sep 2025 11:46:36 GMT
+Transfer-Encoding: chunked
+</file>
+
+<file path="tmp_payload.json">
+{"prompt":"Kurztest"}
+</file>
+
+<file path="app/claims/ui5.yaml">
+# yaml-language-server: $schema=https://sap.github.io/ui5-tooling/schema/ui5.yaml.json
+
+specVersion: "3.1"
+metadata:
+  name: de.claimpilot.claims
+type: application
+server:
+  customMiddleware:
+    - name: fiori-tools-proxy
+      afterMiddleware: compression
+      configuration:
+        ignoreCertError: false # If set to true, certificate errors will be ignored. E.g. self-signed certificates will be accepted
+        ui5:
+          path:
+            - /resources
+            - /test-resources
+          url: https://sapui5.hana.ondemand.com
+    - name: fiori-tools-appreload
+      afterMiddleware: compression
+      configuration:
+        port: 35729
+        path: webapp
+        delay: 300
+</file>
+
+<file path="app/claims/webapp/css/chat.css">
+/* Chat panel styles moved from index.html to ensure they load in FE preview and direct index.html */
+html, body, body > div, #container, #container-uiarea { height: 100%; }
+/* Reserve space for the always-open side panel (used in index.html page layout) */
+body { padding-right: 440px; }
+.cp-chat-container { max-width: 42rem; margin: 0 auto; padding: 0 12px; }
+.cp-bubble { box-sizing: border-box; padding: 0.6rem 0.8rem; border-radius: 0.75rem; word-wrap: break-word; margin: 6px 8px; line-height: 1.5; }
+.cp-bubble.sapMFlexBox { display: inline-block !important; }
+.cp-user { background: #e9f0ff; color: #1b1f24; border-radius: 1rem 1rem .375rem 1rem; max-width: 60%; }
+.cp-assistant { background: #ffffff; border: 1px solid #e5e7eb; box-shadow: 0 1px 2px rgba(0,0,0,.04); border-radius: .75rem .75rem .75rem .25rem; }
+.cp-bubble-wrapper { max-width: 100%; }
+.cp-group-start { margin-top: .6rem; }
+.cp-bubble-actions { margin-left: .25rem; opacity: 0; transition: opacity .15s ease-in-out; }
+.cp-bubble:hover + .cp-bubble-actions { opacity: 1; }
+.cp-suggestions { max-width: 42rem; margin: .25rem auto; padding: .5rem 12px; display: flex; gap: .5rem; }
+.cp-suggestion-btn { border-radius: 999px; background: #f3f4f6; border: 1px solid #e5e7eb; padding: .25rem .6rem; font-weight: 500; }
+.cp-bubble pre { background: #0f172a; color: #e5e7eb; padding: 0.625rem; border-radius: 0.5rem; overflow: auto; margin: .5rem 0; }
+.cp-bubble code { background: #f2f2f3; padding: 0.1rem 0.25rem; border-radius: 0.25rem; }
+.cp-bubble p { margin: 0.3rem 0; }
+.cp-bubble h1, .cp-bubble h2, .cp-bubble h3 { margin: 0.25rem 0; font-weight: 600; }
+.cp-bubble h1 { font-size: 1.125rem; }
+.cp-bubble h2 { font-size: 1.0625rem; }
+.cp-bubble h3 { font-size: 1rem; }
+.cp-bubble h4 { font-size: 0.95rem; margin: 0.25rem 0; font-weight: 600; }
+.cp-bubble h5 { font-size: 0.9rem; margin: 0.25rem 0; font-weight: 600; }
+.cp-bubble h6 { font-size: 0.85rem; margin: 0.25rem 0; font-weight: 600; }
+.cp-bubble hr { border: none; border-top: 1px solid #e5e7eb; margin: .5rem 0; }
+.cp-bubble a { color: #2563eb; text-decoration: underline; }
+.cp-bubble .cp-li { display: block; margin: 2px 0; }
+.cp-bubble .cp-li-num { display: block; margin: 2px 0; }
+.cp-bubble .cp-list { margin: .25rem 0; padding-left: .5rem; }
+.cp-bubble .cp-quote { border-left: 3px solid #e5e7eb; padding-left: .5rem; margin: .35rem 0; color: #4b5563; background: #fafafa; border-radius: .25rem; }
+</file>
+
+<file path="app/claims/webapp/i18n/i18n.properties">
+# This is the resource bundle for de.claimpilot.claims
+
+#Texts for manifest.json
+
+#XTIT: Application name
+appTitle=Schadenmeldungen
+
+#YDES: Application description
+appDescription=Anwendung zur Verwaltung von Kfz-Schadenmeldungen
+</file>
+
+<file path="app/claims/webapp/test/flpSandbox.html">
+<!DOCTYPE HTML>
+<html lang="en">
+<!-- Copyright (c) 2015 SAP AG, All Rights Reserved -->
+<head>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{appTitle}}</title>
+
+    <!-- Bootstrap the unified shell in sandbox mode for standalone usage.
+
+         The renderer is specified in the global Unified Shell configuration object "sap-ushell-config".
+
+         The fiori2 renderer will render the shell header allowing, for instance,
+         testing of additional application setting buttons.
+
+         The navigation target resolution service is configured in a way that the empty URL hash is
+         resolved to our own application.
+
+         This example uses relative path references for the SAPUI5 resources and test-resources;
+         it might be necessary to adapt them depending on the target runtime platform.
+         The sandbox platform is restricted to development or demo use cases and must NOT be used
+         for productive scenarios.
+    -->
+    <script type="text/javascript">
+        window["sap-ushell-config"] = {
+            defaultRenderer: "fiori2",
+            bootstrapPlugins: {
+                "RuntimeAuthoringPlugin": {
+                    component: "sap.ushell.plugins.rta",
+                    config: {
+                        validateAppVersion: false
+                    }
+                }
+            },
+            renderers: {
+                fiori2: {
+                    componentData: {
+                        config: {
+                            search: "hidden",
+                            enableSearch: false
+                        }
+                    }
+                }
+            },
+            applications: {
+                "declaimpilotclaims-tile": {
+                    title: "Schadenmeldungen",
+                    description: "Anwendung zur Verwaltung von Kfz-Schadenmeldungen",
+                    additionalInformation: "SAPUI5.Component=de.claimpilot.claims",
+                    applicationType: "URL",
+                    url: "../"
+                }
+            }
+        };
+    </script>
+
+    <script src="https://sapui5.hana.ondemand.com/1.139.0/test-resources/sap/ushell/bootstrap/sandbox.js" id="sap-ushell-bootstrap"></script>
+    <!-- Bootstrap the UI5 core library. 'data-sap-ui-frameOptions="allow"'' is a NON-SECURE setting for test environments -->
+    <script id="sap-ui-bootstrap"
+        src="https://sapui5.hana.ondemand.com/1.139.0/resources/sap-ui-core.js"
+        data-sap-ui-libs=""
+        data-sap-ui-async="true"
+        data-sap-ui-preload="async"
+        data-sap-ui-theme="sap_horizon"
+        data-sap-ui-compatVersion="edge"
+        data-sap-ui-language="en"
+        data-sap-ui-resourceroots='{"de.claimpilot.claims": "../"}'
+        data-sap-ui-frameOptions="allow"
+        data-sap-ui-flexibilityServices='[{"connector": "LocalStorageConnector"}]'>
+    </script>
+    <script>
+        sap.ui.getCore().attachInit(function () {
+            sap.ushell.Container.createRenderer().placeAt("content");
+        });
+    </script>
+</head>
+
+<!-- UI Content -->
+
+<body class="sapUiBody" id="content">
+</body>
+
+</html>
+</file>
+
+<file path="app/claims/webapp/test/integration/FirstJourney.js">
+sap.ui.define([
+    "sap/ui/test/opaQunit"
+], function (opaTest) {
+    "use strict";
+
+    var Journey = {
+        run: function() {
+            QUnit.module("First journey");
+
+            opaTest("Start application", function (Given, When, Then) {
+                Given.iStartMyApp();
+
+                Then.onTheClaimList.iSeeThisPage();
+
+            });
+
+
+            opaTest("Navigate to ObjectPage", function (Given, When, Then) {
+                // Note: this test will fail if the ListReport page doesn't show any data
+                
+                When.onTheClaimList.onFilterBar().iExecuteSearch();
+                
+                Then.onTheClaimList.onTable().iCheckRows();
+
+                When.onTheClaimList.onTable().iPressRow(0);
+                Then.onTheClaimObjectPage.iSeeThisPage();
+
+            });
+
+            opaTest("Teardown", function (Given, When, Then) { 
+                // Cleanup
+                Given.iTearDownMyApp();
+            });
+        }
+    }
+
+    return Journey;
+});
+</file>
+
+<file path="app/claims/webapp/test/integration/opaTests.qunit.html">
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Integration tests</title>
+    <meta charset="utf-8">
+
+    <script id="sap-ui-bootstrap"
+            src="/resources/sap-ui-core.js"
+            data-sap-ui-theme='sap_fiori_3'
+            data-sap-ui-resourceroots='{
+                "de.claimpilot.claims": "../../"
+            }'
+            data-sap-ui-animation="false"
+            data-sap-ui-compatVersion="edge"
+            data-sap-ui-async="true">
+    </script>
+
+    <link rel="stylesheet" type="text/css" href="/resources/sap/ui/thirdparty/qunit-2.css">
+
+    <script src="/resources/sap/ui/thirdparty/qunit-2.js"></script>
+    <script src="/resources/sap/ui/qunit/qunit-junit.js"></script>
+
+    <script src="opaTests.qunit.js"></script>
+
+</head>
+<body>
+    <div id="qunit"></div>
+    <div id="qunit-fixture"></div>
+</body>
+</html>
+</file>
+
+<file path="app/claims/webapp/test/integration/opaTests.qunit.js">
+sap.ui.require(
+    [
+        'sap/fe/test/JourneyRunner',
+        'de/claimpilot/claims/test/integration/FirstJourney',
+		'de/claimpilot/claims/test/integration/pages/ClaimList',
+		'de/claimpilot/claims/test/integration/pages/ClaimObjectPage'
+    ],
+    function(JourneyRunner, opaJourney, ClaimList, ClaimObjectPage) {
+        'use strict';
+        var JourneyRunner = new JourneyRunner({
+            // start index.html in web folder
+            launchUrl: sap.ui.require.toUrl('de/claimpilot/claims') + '/index.html'
+        });
+
+       
+        JourneyRunner.run(
+            {
+                pages: { 
+					onTheClaimList: ClaimList,
+					onTheClaimObjectPage: ClaimObjectPage
+                }
+            },
+            opaJourney.run
+        );
+    }
+);
+</file>
+
+<file path="app/claims/webapp/test/integration/pages/ClaimList.js">
+sap.ui.define(['sap/fe/test/ListReport'], function(ListReport) {
+    'use strict';
+
+    var CustomPageDefinitions = {
+        actions: {},
+        assertions: {}
+    };
+
+    return new ListReport(
+        {
+            appId: 'de.claimpilot.claims',
+            componentId: 'ClaimList',
+            contextPath: '/Claim'
+        },
+        CustomPageDefinitions
+    );
+});
+</file>
+
+<file path="app/claims/webapp/test/integration/pages/ClaimObjectPage.js">
+sap.ui.define(['sap/fe/test/ObjectPage'], function(ObjectPage) {
+    'use strict';
+
+    var CustomPageDefinitions = {
+        actions: {},
+        assertions: {}
+    };
+
+    return new ObjectPage(
+        {
+            appId: 'de.claimpilot.claims',
+            componentId: 'ClaimObjectPage',
+            contextPath: '/Claim'
+        },
+        CustomPageDefinitions
+    );
+});
+</file>
+
+<file path="app/claims/webapp/test/testsuite.qunit.html">
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>QUnit test suite</title>
+    <script src="../resources/sap/ui/qunit/qunit-redirect.js"></script>
+    <script src="testsuite.qunit.js" data-sap-ui-testsuite></script>
+  </head>
+  <body></body>
+</html>
+</file>
+
+<file path="app/claims/webapp/test/testsuite.qunit.js">
+window.suite = function() {
+    'use strict';
+
+    // eslint-disable-next-line
+    var oSuite = new parent.jsUnitTestSuite(),
+    
+    sContextPath = location.pathname.substring(0, location.pathname.lastIndexOf('/') + 1);
+    oSuite.addTestPage(sContextPath + 'integration/opaTests.qunit.html');
+
+    return oSuite;
+};
+</file>
+
+<file path="db/data/sap.kfz-Claim.csv">
+ID,claimNumber,status,lossDate,reportedDate,description,severity,reserveAmount,policy_ID,vehicle_ID
+ccccccc1-0000-0000-0000-000000000001,CL-1001,intake,2025-08-30T17:45:00Z,2025-08-31T09:15:00Z,"Auffahrunfall an Ampel, Airbag ausgelöst. Keine Verletzten.",medium,1500.00,aaaaaaa1-0000-0000-0000-000000000001,bbbbbbb1-0000-0000-0000-000000000001
+ccccccc2-0000-0000-0000-000000000002,CL-1002,review,2025-08-20T12:10:00Z,2025-08-21T08:30:00Z,"Parkschaden an Stoßstange, Verursacher unbekannt.",low,300.00,aaaaaaa2-0000-0000-0000-000000000002,bbbbbbb2-0000-0000-0000-000000000002
+</file>
+
+<file path="db/data/sap.kfz-Document.csv">
+ID,fileName,mimeType,storageRef,source,claim_ID
+eeeeeee1-0000-0000-0000-000000000001,claim-1001.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,files/claim-1001/claim.xlsx,email,ccccccc1-0000-0000-0000-000000000001
+eeeeeee2-0000-0000-0000-000000000002,fotos.zip,application/zip,files/claim-1002/fotos.zip,upload,ccccccc2-0000-0000-0000-000000000002
+</file>
+
+<file path="db/data/sap.kfz-Email.csv">
+ID,messageId,subject,fromAddress,receivedAt,hasAttachments,claim_ID
+ddddddd1-0000-0000-0000-000000000001,<msg-1@contoso>,Schadenmeldung VS-4711 / CL-1001,max.mustermann@example.com,2025-08-31T09:00:00Z,true,ccccccc1-0000-0000-0000-000000000001
+ddddddd2-0000-0000-0000-000000000002,<msg-2@contoso>,Parkschaden VS-815 / CL-1002,erika.beispiel@example.com,2025-08-21T08:20:00Z,false,ccccccc2-0000-0000-0000-000000000002
+</file>
+
+<file path="db/data/sap.kfz-Insured.csv">
+ID,name,email,phone,address
+11111111-1111-1111-1111-111111111111,Max Mustermann,max.mustermann@example.com,+49 170 1234567,"Beispielweg 1, 80331 München"
+22222222-2222-2222-2222-222222222222,Erika Beispiel,erika.beispiel@example.com,+49 171 2345678,"Demoallee 5, 50667 Köln"
+</file>
+
+<file path="db/data/sap.kfz-Policy.csv">
+ID,policyNumber,product,effectiveDate,expiryDate,coverageLimits,insured_ID
+aaaaaaa1-0000-0000-0000-000000000001,VS-4711,KFZ-Kasko,2025-01-01,2025-12-31,Haftpflicht+Teilkasko,11111111-1111-1111-1111-111111111111
+aaaaaaa2-0000-0000-0000-000000000002,VS-815,KFZ-Haftpflicht,2025-03-01,2026-02-28,Haftpflicht,22222222-2222-2222-2222-222222222222
+</file>
+
+<file path="db/data/sap.kfz-Task.csv">
+ID,type,status,dueDate,assignee,claim_ID
+fffffff1-0000-0000-0000-000000000001,triage,open,2025-09-02,Sachbearbeiter A,ccccccc1-0000-0000-0000-000000000001
+fffffff2-0000-0000-0000-000000000002,clarify-data,in_progress,2025-09-03,Sachbearbeiter B,ccccccc2-0000-0000-0000-000000000002
+</file>
+
+<file path="db/data/sap.kfz-Vehicle.csv">
+ID,vin,plate,make,model,year
+bbbbbbb1-0000-0000-0000-000000000001,WVWZZZ1JZXW000001,M-AB 1234,Volkswagen,Golf,2020
+bbbbbbb2-0000-0000-0000-000000000002,WBACB11010DU00002,K-KA 9876,BMW,3er,2019
+</file>
+
+<file path="db/schema.cds">
+using { cuid, managed } from '@sap/cds/common';
+
+namespace sap.kfz;
+
+type Severity : String(10); // low|medium|high
+type TaskStatus : String(20); // open|in_progress|done
+
+entity Insured : cuid, managed {
+  name     : String(100);
+  email    : String(255);
+  phone    : String(40);
+  address  : String(255);
+}
+
+entity Policy : cuid, managed {
+  policyNumber   : String(30);
+  product        : String(40);
+  effectiveDate  : Date;
+  expiryDate     : Date;
+  coverageLimits : String(255);
+  insured        : Association to Insured;
+}
+
+entity Vehicle : cuid, managed {
+  vin    : String(20);
+  plate  : String(15);
+  make   : String(40);
+  model  : String(40);
+  year   : Integer;
+}
+
+entity Claim : cuid, managed {
+  claimNumber  : String(30);
+  status       : String(30);
+  lossDate     : DateTime;
+  reportedDate : DateTime;
+  description  : LargeString;
+  severity     : Severity;
+  reserveAmount: Decimal(15,2);
+  policy       : Association to Policy;
+  vehicle      : Association to Vehicle;
+
+  emails       : Composition of many Email    on emails.claim    = $self;
+  documents    : Composition of many Document on documents.claim = $self;
+  tasks        : Composition of many Task     on tasks.claim     = $self;
+}
+
+entity Email : cuid, managed {
+  messageId      : String(120);
+  subject        : String(255);
+  fromAddress    : String(255); // 'from' ist reserviert in CDS
+  receivedAt     : DateTime;
+  hasAttachments : Boolean;
+  claim          : Association to Claim;
+}
+
+entity Document : cuid, managed {
+  fileName   : String(255);
+  mimeType   : String(60);
+  storageRef : String(255);
+  source     : String(20); // email|upload|excel
+  claim      : Association to Claim;
+}
+
+entity Task : cuid, managed {
+  type     : String(40); // triage|estimation|contact|payment|clarify-data
+  status   : TaskStatus;
+  dueDate  : Date;
+  assignee : String(100);
+  claim    : Association to Claim;
+}
+</file>
+
+<file path="README.md">
+ClaimPilot CAP Backend (ohne Fiori)
+
+Dieses Projekt stellt ein minimales CAP-Backend (Node.js, OData v4) für die Domäne KFZ bereit. Es enthält:
+- CDS-Domänenmodell unter `db/schema.cds` (sap.kfz)
+- OData-Service unter `srv/service.cds` (Pfad `/service/kfz`)
+- Action `callLLM(prompt)` mit Platzhalter-Handler in `srv/service.js`
+
+Schnellstart
+- Abhängigkeiten: `npm install`
+- Entwickeln: `npm run watch` (oder `cds watch`)
+- Service öffnen: `http://localhost:9999/service/kfz/`
+
+Hinweise
+- Standard-DB ist SQLite (`sqlite.db`). PostgreSQL kann später konfiguriert werden.
+- Fiori Elements wird hier bewusst nicht bereitgestellt; UI-Generierung folgt separat.
+</file>
+
+<file path="scripts/check-destination.js">
+/*
+  Checks if a Destination named "aicore-destination" exists via Destination Configuration API
+  Uses credentials from VCAP_SERVICES (provided by `cds bind --exec` in hybrid mode)
+*/
+const https = require('https');
+
+function httpPostForm(url, form, basicAuth) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const data = new URLSearchParams(form).toString();
+    const req = https.request({
+      method: 'POST',
+      hostname: u.hostname,
+      path: u.pathname + (u.search || ''),
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(data),
+        ...(basicAuth ? { Authorization: `Basic ${basicAuth}` } : {})
+      }
+    }, res => {
+      let body = '';
+      res.on('data', c => body += c);
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          try { resolve(JSON.parse(body)); } catch (e) { resolve(body); }
+        } else {
+          reject(new Error(`HTTP ${res.statusCode}: ${body}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
+
+function httpGetJson(url, bearer) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = https.request({
+      method: 'GET',
+      hostname: u.hostname,
+      path: u.pathname + (u.search || ''),
+      headers: {
+        'Authorization': `Bearer ${bearer}`,
+        'Accept': 'application/json'
+      }
+    }, res => {
+      let body = '';
+      res.on('data', c => body += c);
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          try { resolve(JSON.parse(body)); } catch (e) { resolve(body); }
+        } else {
+          reject(new Error(`HTTP ${res.statusCode}: ${body}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+(async () => {
+  try {
+    const vcap = JSON.parse(process.env.VCAP_SERVICES || '{}');
+    const destCreds = vcap.destination && vcap.destination[0] && vcap.destination[0].credentials;
+    if (!destCreds) {
+      console.error('No destination credentials found in VCAP_SERVICES.');
+      process.exit(2);
+    }
+
+    const tokenUrl = `${destCreds.url.replace(/\/$/, '')}/oauth/token`;
+    const clientId = destCreds.clientid;
+    const clientSecret = destCreds.clientsecret;
+    const basic = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+
+    const tokenResp = await httpPostForm(tokenUrl, { grant_type: 'client_credentials' }, basic);
+    const accessToken = tokenResp.access_token;
+    if (!accessToken) throw new Error('No access_token in token response');
+
+    const listUrl = `${destCreds.uri.replace(/\/$/, '')}/destination-configuration/v1/subaccountDestinations`;
+    const dests = await httpGetJson(listUrl, accessToken);
+    const names = Array.isArray(dests) ? dests.map(d => d.Name) : [];
+    const exists = names.includes('aicore-destination');
+    console.log(JSON.stringify({ exists, names: names.slice(0, 10) }));
+    process.exit(exists ? 0 : 1);
+  } catch (e) {
+    console.error('Destination check failed:', e.message);
+    process.exit(3);
+  }
+})();
+</file>
+
+<file path="scripts/list-deployments.js">
+const { executeHttpRequest } = require('@sap-cloud-sdk/http-client');
+
+(async () => {
+  try {
+    const destinationName = process.env.DEST_NAME || 'aicore-destination';
+    const apiVersion = process.env.API_VERSION || '2024-08-06';
+    const url = `/v2/inference/deployments?api-version=${encodeURIComponent(apiVersion)}`;
+    const resourceGroup = process.env.RESOURCE_GROUP || 'default';
+    const resp = await executeHttpRequest({ destinationName }, { method: 'GET', url, headers: { 'AI-Resource-Group': resourceGroup } });
+    const items = Array.isArray(resp.data?.value) ? resp.data.value : (Array.isArray(resp.data) ? resp.data : []);
+    const out = items.map(d => ({ id: d.id || d.name || d.deploymentId, model: d.model || d.properties?.model, status: d.status || d.properties?.status })).slice(0, 50);
+    console.log(JSON.stringify(out, null, 2));
+  } catch (e) {
+    console.error('Failed to list deployments:', e.message);
+    process.exit(1);
+  }
+})();
+</file>
+
+<file path="scripts/sse-debug.js">
+#!/usr/bin/env node
+// Quick SSE debug client for /ai/stream
+// Usage: node scripts/sse-debug.js "Your prompt"
+
+const http = require('http');
+const https = require('https');
+
+function fetchSSE(url, body) {
+  return new Promise((resolve, reject) => {
+    const isHttps = url.startsWith('https:');
+    const lib = isHttps ? https : http;
+    const u = new URL(url);
+    const data = JSON.stringify(body || {});
+    const req = lib.request({
+      hostname: u.hostname,
+      port: u.port || (isHttps ? 443 : 80),
+      path: u.pathname + (u.search || ''),
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data),
+      }
+    }, (res) => {
+      res.setEncoding('utf8');
+      let buf = '';
+      res.on('data', chunk => {
+        buf += chunk;
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) >= 0) {
+          const raw = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          console.log('RAW:', JSON.stringify(raw));
+        }
+      });
+      res.on('end', resolve);
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
+
+(async () => {
+  const prompt = process.argv.slice(2).join(' ') || 'Sag Hallo.';
+  const url = process.env.SSE_URL || 'http://localhost:9999/ai/stream';
+  console.log('Posting to', url, 'prompt=', prompt);
+  await fetchSSE(url, { prompt });
+})();
+</file>
+
+<file path="scripts/test-bullet-heuristic.js">
+#!/usr/bin/env node
+// Quick demo of the bullet newline heuristic used in the UI streaming client.
+
+function normalizeBulletsStreaming(prev, chunk) {
+  if (!chunk) return chunk;
+  let s = String(chunk);
+  try {
+    if (prev && !/\n$/.test(prev) && /^(\s*)(?:[-*]\s+|\d+\.\s+)/.test(s)) {
+      s = "\n" + s;
+    }
+    // Only hyphen bullets; avoid '*' to not break bold '**'
+    s = s.replace(/([^\n])(?=-\s+)/g, '$1\n');
+    s = s.replace(/([^\n])(?=\d+\.\s+)/g, '$1\n');
+  } catch (e) { /* ignore */ }
+  return s;
+}
+
+const input = (process.argv[2] || '').trim() || `Natürlich! Hier sind Stichpunkte über Animes:
+- **Definition:** Japanische Zeichentrickfilme, oft für Kinder, Jugendliche und Erwachsene.- **Stil:** Charakteristisch durch große Augen, bunte Haare, ausdrucksstarke Mimik.- **Genres:** Vielfältig, z.B. Action, Abenteuer, Romantik, Horror, Fantasy, Slice of Life, Mecha.- **Herkunft:** Ursprünglich aus Japan, international sehr beliebt.- **Formate:** Serien, Filme, OVAs (Original Video Animation), Specials.- **Manga:** Viele Animes basieren auf Mangas (japanische Comics).- **Bekannte Studios:** Studio Ghibli, Toei Animation, Madhouse, Kyoto Animation.- **Berühmte Werke:** „Naruto“, „One Piece“, „Dragon Ball“, „Attack on Titan“, „My Hero Academia“.- **Fankultur:** Große Fangemeinde weltweit, Cosplay, Conventions, Fanarts.- **Synchronisation:** Oft mit japanischer Originalsprache und Untertiteln, aber auch synchronisiert.- **Musik:** Soundtracks und Openings/Endings sind oft sehr beliebt.- **Themen:** Häufig tiefe Themen wie Freundschaft, Mut, Verlust, Erwachsenwerden.- **Merchandise:** Figuren, Poster, Kleidung, Spiele, u.v.m.- **Zensur:** In manchen Ländern werden Animes zensiert oder angepasst.`;
+
+// Simulate stream chunks by splitting on ' - ' sequences
+const parts = input.split(/\s-\s/);
+let acc = parts.shift() || '';
+let out = acc;
+for (const part of parts) {
+  const chunk = `- ${part}`;
+  const norm = normalizeBulletsStreaming(acc, chunk);
+  acc += norm;
+  out = acc;
+}
+
+console.log("--- Normalized ---\n");
+console.log(out);
+</file>
+
+<file path="scripts/test-chat.js">
+#!/usr/bin/env node
+/*
+  Test the AI chat streaming endpoint with a prompt.
+  - Posts to SSE endpoint (/ai/stream)
+  - Parses SSE and aggregates text, interpreting empty data events as newlines
+  - Prints final text and a quick structure summary
+
+  Usage:
+    node scripts/test-chat.js --prompt "Nenne mir Stuchpunkte über ANimes"
+    SSE_URL=http://localhost:9999/ai/stream node scripts/test-chat.js
+*/
+
+const http = require('http');
+const https = require('https');
+
+function parseArgs(argv) {
+  const out = { prompt: 'Nenne mir Stuchpunkte über ANimes' };
+  for (let i = 2; i < argv.length; i++) {
+    const a = argv[i];
+    if ((a === '--prompt' || a === '-p') && i + 1 < argv.length) { out.prompt = argv[++i]; continue; }
+    if ((a === '--url' || a === '-u') && i + 1 < argv.length) { out.url = argv[++i]; continue; }
+  }
+  out.url = out.url || process.env.SSE_URL || 'http://localhost:9999/ai/stream';
+  return out;
+}
+
+function postSSE(url, body, onEvent) {
+  return new Promise((resolve, reject) => {
+    const isHttps = url.startsWith('https:');
+    const lib = isHttps ? https : http;
+    const u = new URL(url);
+    const data = JSON.stringify(body || {});
+    const req = lib.request({
+      hostname: u.hostname,
+      port: u.port || (isHttps ? 443 : 80),
+      path: u.pathname + (u.search || ''),
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data),
+      }
+    }, (res) => {
+      res.setEncoding('utf8');
+      let buf = '';
+      res.on('data', chunk => {
+        buf += chunk;
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) >= 0) {
+          const raw = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          // Parse one SSE block
+          const lines = raw.split(/\n/);
+          let event = 'message';
+          const dataLines = [];
+          for (const line of lines) {
+            if (!line) continue;
+            if (line.startsWith(':')) continue; // comment
+            if (line.startsWith('event:')) { event = line.slice(6).trim(); continue; }
+            if (line.startsWith('data:')) {
+              let d = line.slice(5);
+              if (d.startsWith(' ')) d = d.slice(1);
+              dataLines.push(d);
+            }
+          }
+          const dataStr = dataLines.join('\n');
+          onEvent && onEvent({ event, data: dataStr });
+        }
+      });
+      res.on('end', resolve);
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
+
+(async () => {
+  const { url, prompt } = parseArgs(process.argv);
+  console.log('Testing SSE:', url);
+  console.log('Prompt       :', prompt);
+  let text = '';
+  const started = Date.now();
+  await postSSE(url, { prompt }, ({ event, data }) => {
+    if (event === 'error') {
+      console.error('SSE error:', data);
+      return;
+    }
+    if (event === 'end') return; // ignore marker
+    if (data === '[DONE]') return; // end chunk
+    // Interpret empty data as a newline (common with token streams)
+    text += (data === '' ? '\n' : data);
+  });
+  const ms = Date.now() - started;
+
+  console.log('\n--- Final Text ---\n');
+  console.log(text);
+  console.log('\n--- Summary ---');
+  const paragraphs = text.split(/\n\n+/).filter(Boolean);
+  const lines = text.split(/\n/).length;
+  const bullets = (text.match(/^\s*[-*]\s+/gm) || []).length + (text.match(/^\s*\d+\.\s+/gm) || []).length;
+  console.log('Length     :', text.length, 'chars');
+  console.log('Lines      :', lines);
+  console.log('Paragraphs :', paragraphs.length);
+  console.log('Bullets    :', bullets);
+  console.log('Duration   :', ms + 'ms');
+})();
+</file>
+
+<file path="srv/claim-flat.cds">
+using { sap.kfz as kfz } from '../db/schema';
+
+entity ClaimFlat as select from kfz.Claim {
+  *,
+  policy.policyNumber as policyNumber,
+  vehicle.plate       as plate
+};
+</file>
+
+<file path="srv/fe-annotations.cds">
+using KfzService as service from './service';
+
+annotate service.Claim with @(
+  UI.HeaderInfo : {
+    TypeName       : 'Schaden',
+    TypeNamePlural : 'Schaeden',
+    Title          : { Value : claimNumber },
+    Description    : { Value : status }
+  },
+
+  UI.SelectionFields : [
+    claimNumber, status, severity, lossDate
+  ],
+
+  UI.LineItem : [
+    { $Type : 'UI.DataField', Value : claimNumber,            Label : 'Claim',        ![@UI.Importance] : #High },
+    { $Type : 'UI.DataField', Value : policy.policyNumber,    Label : 'Police',       ![@UI.Importance] : #High },
+    { $Type : 'UI.DataField', Value : vehicle.plate,          Label : 'Kennzeichen',  ![@UI.Importance] : #High },
+    { $Type : 'UI.DataField', Value : lossDate,               Label : 'Schadendatum', ![@UI.Importance] : #High },
+    { $Type : 'UI.DataField', Value : status,                 Label : 'Status',       ![@UI.Importance] : #High },
+    { $Type : 'UI.DataField', Value : severity,               Label : 'Schadenschwere' },
+    { $Type : 'UI.DataField', Value : reportedDate,           Label : 'Meldedatum' }
+  ],
+
+  UI.Facets : [
+    {
+      $Type : 'UI.ReferenceFacet',
+      Label : 'Allgemeine Informationen',
+      Target: '@UI.FieldGroup#General'
+    },
+    {
+      $Type : 'UI.ReferenceFacet',
+      Label : 'Beschreibung',
+      Target: '@UI.FieldGroup#Description'
+    },
+    {
+      $Type : 'UI.ReferenceFacet',
+      Label : 'E-Mails',
+      Target: 'emails/@UI.LineItem'
+    },
+    {
+      $Type : 'UI.ReferenceFacet',
+      Label : 'Dokumente',
+      Target: 'documents/@UI.LineItem'
+    },
+    {
+      $Type : 'UI.ReferenceFacet',
+      Label : 'Aufgaben',
+      Target: 'tasks/@UI.LineItem'
+    }
+  ],
+
+  UI.FieldGroup #General : {
+    Data : [
+      { Value : claimNumber,          Label : 'Claim' },
+      { Value : status,               Label : 'Status' },
+      { Value : severity,             Label : 'Schadenschwere' },
+      { Value : lossDate,             Label : 'Schadendatum' },
+      { Value : reportedDate,         Label : 'Meldedatum' },
+      { Value : policy.policyNumber,  Label : 'Police' },
+      { Value : vehicle.plate,        Label : 'Kennzeichen' },
+      { Value : reserveAmount,        Label : 'Reserve' }
+    ]
+  },
+
+  UI.FieldGroup #Description : {
+    Data : [
+      { Value : description, Label : 'Beschreibung' }
+    ]
+  }
+);
+
+annotate service.Claim with {
+  description   @title : 'Beschreibung'            @UI.MultiLineText;
+  claimNumber   @title : 'Claim';
+  status        @title : 'Status';
+  severity      @title : 'Schadenschwere';
+  lossDate      @title : 'Schadendatum';
+  reportedDate  @title : 'Meldedatum';
+  reserveAmount @title : 'Reserve';
+};
+
+annotate service.Claim with @(
+  Capabilities.InsertRestrictions  : { Insertable : true },
+  Capabilities.UpdateRestrictions  : { Updatable  : true },
+  Capabilities.DeleteRestrictions  : { Deletable  : true }
+);
+
+annotate service.Claim with {
+  policy @Common.ValueList : {
+    $Type          : 'Common.ValueListType',
+    CollectionPath : 'Policy',
+    Parameters     : [
+      { $Type : 'Common.ValueListParameterInOut',  LocalDataProperty : policy_ID,  ValueListProperty : 'ID' },
+      { $Type : 'Common.ValueListParameterDisplayOnly', ValueListProperty : 'policyNumber' }
+    ]
+  };
+  vehicle @Common.ValueList : {
+    $Type          : 'Common.ValueListType',
+    CollectionPath : 'Vehicle',
+    Parameters     : [
+      { $Type : 'Common.ValueListParameterInOut',  LocalDataProperty : vehicle_ID, ValueListProperty : 'ID' },
+      { $Type : 'Common.ValueListParameterDisplayOnly', ValueListProperty : 'plate' }
+    ]
+  };
+};
+
+annotate service.Email with @(
+  UI.LineItem : [
+    { $Type : 'UI.DataField', Value : subject,       Label : 'Betreff' },
+    { $Type : 'UI.DataField', Value : fromAddress,   Label : 'Von' },
+    { $Type : 'UI.DataField', Value : receivedAt,    Label : 'Empfangen am' },
+    { $Type : 'UI.DataField', Value : hasAttachments,Label : 'Anhänge' }
+  ]
+);
+
+annotate service.Email with @(
+  Capabilities.InsertRestrictions  : { Insertable : true },
+  Capabilities.UpdateRestrictions  : { Updatable  : true },
+  Capabilities.DeleteRestrictions  : { Deletable  : true }
+);
+
+annotate service.Document with @(
+  UI.LineItem : [
+    { $Type : 'UI.DataField', Value : fileName,   Label : 'Datei' },
+    { $Type : 'UI.DataField', Value : mimeType,   Label : 'Typ' },
+    { $Type : 'UI.DataField', Value : source,     Label : 'Quelle' }
+  ]
+);
+
+annotate service.Document with @(
+  Capabilities.InsertRestrictions  : { Insertable : true },
+  Capabilities.UpdateRestrictions  : { Updatable  : true },
+  Capabilities.DeleteRestrictions  : { Deletable  : true }
+);
+
+annotate service.Task with @(
+  UI.LineItem : [
+    { $Type : 'UI.DataField', Value : type,     Label : 'Typ' },
+    { $Type : 'UI.DataField', Value : status,   Label : 'Status' },
+    { $Type : 'UI.DataField', Value : dueDate,  Label : 'Fällig am' },
+    { $Type : 'UI.DataField', Value : assignee, Label : 'Bearbeiter' }
+  ]
+);
+
+annotate service.Task with @(
+  Capabilities.InsertRestrictions  : { Insertable : true },
+  Capabilities.UpdateRestrictions  : { Updatable  : true },
+  Capabilities.DeleteRestrictions  : { Deletable  : true }
+);
+</file>
+
+<file path=".gitignore">
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log
+
+# CAP/DB
+sqlite.db
+db.sqlite
+*.hdbtabledata
+
+# Env
+.env
+.env.local
+
+# OS/Editor
+.DS_Store
+Thumbs.db
+.vscode/
+*.code-workspace
+
+
+# added by cds
+.cdsrc-private.json
+</file>
+
+<file path="app/claims/package.json">
+{
+  "name": "claims",
+  "version": "0.0.1",
+  "description": "Anwendung zur Verwaltung von Kfz-Schadenmeldungen",
+  "keywords": [
+    "ui5",
+    "openui5",
+    "sapui5",
+    "fiori",
+    "fiori-elements",
+    "odata-v4",
+    "cap",
+    "ai",
+    "chat",
+    "sidepanel"
+  ],
+  "main": "webapp/index.html",
+  "dependencies": {},
+  "devDependencies": {
+    "@ui5/cli": "^3.0.0",
+    "@sap/ux-ui5-tooling": "1"
+  },
+  "scripts": {
+    "start": "ui5 serve -o /index.html",
+    "build": "ui5 build --all",
+    "deploy-config": "npx -p @sap/ux-ui5-tooling fiori add deploy-config cf"
+  }
+}
+</file>
+
+<file path="app/claims/README.md">
+## Application Details
+|               |
+| ------------- |
+|**Generation Date and Time**<br>Sun Aug 31 2025 15:57:45 GMT+0200 (Central European Summer Time)|
+|**App Generator**<br>SAP Fiori Application Generator|
+|**App Generator Version**<br>1.17.5|
+|**Generation Platform**<br>CLI|
+|**Template Used**<br>List Report Page V4|
+|**Service Type**<br>Local Cap|
+|**Service URL**<br>http://localhost:9999/service/kfz/|
+|**Module Name**<br>claims|
+|**Application Title**<br>Schadenmeldungen|
+|**Namespace**<br>de.claimpilot.claims|
+|**UI5 Theme**<br>sap_horizon|
+|**UI5 Version**<br>1.139.0|
+|**Enable Code Assist Libraries**<br>False|
+|**Enable TypeScript**<br>False|
+|**Add Eslint configuration**<br>False|
+|**Main Entity**<br>Claim|
+|**Navigation Entity**<br>None|
+
+## claims
+
+Anwendung zur Verwaltung von Kfz-Schadenmeldungen
+
+### Starting the generated app
+
+-   This app has been generated using the SAP Fiori tools - App Generator, as part of the SAP Fiori tools suite.  In order to launch the generated app, simply start your CAP project and navigate to the following location in your browser:
+
+http://localhost:9999/claims/webapp/index.html
+
+#### Pre-requisites:
+
+1. Active NodeJS LTS (Long Term Support) version and associated supported NPM version.  (See https://nodejs.org)
+</file>
+
+<file path="scripts/test-render.js">
+#!/usr/bin/env node
+
+function renderMarkdownToHtml(input) {
+  const escapeHtml = (s) => String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+  if (input == null) return '';
+  let src = String(input).replace(/\r\n/g, "\n");
+
+  // Extract fenced code blocks
+  const blocks = [];
+  src = src.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (m, lang, code) => {
+    const idx = blocks.push({ lang: lang || '', code }) - 1;
+    return `[[[CODE_BLOCK_${idx}]]]`;
+  });
+  src = src.replace(/~~~([a-zA-Z0-9_-]*)\n([\s\S]*?)~~~/g, (m, lang, code) => {
+    const idx = blocks.push({ lang: lang || '', code }) - 1;
+    return `[[[CODE_BLOCK_${idx}]]]`;
+  });
+
+  let html = escapeHtml(src);
+
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, (m, c) => `<code>${c}</code>`);
+  // Bold
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  // Italic with underscores
+  html = html.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1<em>$2</em>');
+  // Inline numbered bullets after punctuation
+  html = html.replace(/([:\.\)!\]])(\s*)(\d+\.\s+)/g, '$1\n$3');
+  // Inline hyphen bullets after punctuation
+  html = html.replace(/([:\.\)!\]])(\s*)(-\s+)/g, '$1\n$3');
+
+  // Linkify
+  html = html.replace(/(https?:\/\/[^\s<]+[^<\.,:;"')\]\s])/g, '<a href="$1" target="_blank" rel="noreferrer noopener">$1</a>');
+
+  const lineify = (text) => {
+    const lines = text.split(/\n/);
+    const out = [];
+    for (let line of lines) {
+      if (/^\s*-\s+/.test(line)) {
+        const content = line.replace(/^\s*-\s+/, '');
+        out.push(`<span class=\"cp-li\">• ${content}</span>`);
+        continue;
+      }
+      if (/^\s*\d+\.\s+/.test(line)) {
+        out.push(`<span class=\"cp-li cp-li-num\">${line.trim()}</span>`);
+        continue;
+      }
+      if (line.trim() === '') { out.push(''); continue; }
+      out.push(line);
+    }
+    return out.join('\n');
+  };
+  html = lineify(html);
+
+  html = html.replace(/\n\n+/g, '<br/><br/>' );
+  html = html.replace(/\n/g, '<br/>' );
+
+  // Restore code blocks
+  html = html.replace(/\[\[\[CODE_BLOCK_(\d+)\]\]\]/g, (m, i) => {
+    const blk = blocks[Number(i)] || { lang: '', code: '' };
+    const content = escapeHtml(blk.code);
+    return `<pre><code data-lang="${blk.lang}">${content}</code></pre>`;
+  });
+
+  return html;
+}
+
+const input = process.argv.slice(2).join(' ') || 'Natürlich! Hier sind fünf Punkte über BTS:1. **Wer sie sind:** BTS (Bangtan Sonyeondan oder "Bangtan Boys") ist eine südkoreanische Boygroup, die 2013 von Big Hit Entertainment gegründet wurde.2. **Mitglieder:** Die Gruppe besteht aus sieben Mitgliedern: RM, Jin, Suga, J-Hope, Jimin, V und Jungkook.3. **Musikstil:** BTS ist bekannt für eine Mischung aus K-Pop, Hip-Hop, R&B und EDM. Ihre Texte behandeln oft gesellschaftliche Themen, persönliche Kämpfe und Selbstliebe.4. **Erfolge:** BTS hat zahlreiche internationale Auszeichnungen gewonnen, darunter Billboard Music Awards und American Music Awards. Sie waren die erste K-Pop-Gruppe, die auf Platz 1 der US Billboard 200 landete.5. **Soziales Engagement:** Die Gruppe engagiert sich sozial, zum Beispiel mit der "Love Myself"-Kampagne in Zusammenarbeit mit UNICEF gegen Gewalt an Kindern und Jugendlichen.';
+
+console.log(renderMarkdownToHtml(input));
+</file>
+
+<file path="srv/server.js">
+const cds = require('@sap/cds');
+
+async function streamGenAI(prompt, res, opts = {}) {
+  const { AzureOpenAiChatClient } = await import('@sap-ai-sdk/langchain');
+  const destinationName = process.env.AI_DESTINATION_NAME || 'aicore-destination';
+  const modelName = process.env.AI_MODEL_NAME || 'gpt-4.1';
+
+  const client = new AzureOpenAiChatClient({ modelName, temperature: 0.3 }, { destinationName });
+
+  const forceFallback = !!opts.forceFallback;
+  try {
+    if (forceFallback) throw new Error('forced-fallback');
+    const stream = await client.stream([
+      { role: 'user', content: String(prompt || '') }
+    ]);
+
+    for await (const chunk of stream) {
+      const piece = typeof chunk.content === 'string'
+        ? chunk.content
+        : Array.isArray(chunk.content)
+          ? chunk.content.map(p => (typeof p === 'string' ? p : p?.text || '')).join('')
+          : '';
+      if (piece) res.write(`data: ${piece}\n\n`);
+    }
+  } catch (e) {
+    const result = await client.invoke([
+      { role: 'user', content: String(prompt || '') }
+    ]);
+    const content = typeof result.content === 'string'
+      ? result.content
+      : Array.isArray(result.content)
+        ? result.content.map(p => (typeof p === 'string' ? p : p?.text || '')).join('')
+        : '';
+    const text = String(content || '');
+    const chunkSize = 64;
+    for (let i = 0; i < text.length; i += chunkSize) {
+      const piece = text.slice(i, i + chunkSize);
+      if (piece) res.write(`data: ${piece}\n\n`);
+      await new Promise(r => setTimeout(r, 10));
+    }
+  }
+  res.write(`event: end\n`);
+  res.write(`data: [DONE]\n\n`);
+  res.end();
+}
+
+cds.on('bootstrap', (app) => {
+  // Server-Sent Events endpoint for streaming chat responses
+  app.post('/ai/stream', expressJson(), async (req, res) => {
+    try {
+      const prompt = (req.body && req.body.prompt) || '';
+      res.status(200);
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders && res.flushHeaders();
+      const forceFallback = req.headers['x-use-fallback'] === '1' || req.query.fallback === '1';
+      await streamGenAI(prompt, res, { forceFallback });
+    } catch (e) {
+      try {
+        res.write(`event: error\n`);
+        res.write(`data: ${JSON.stringify({ message: e && e.message ? e.message : String(e) })}\n\n`);
+        res.end();
+      } catch (_) { /* ignore */ }
+    }
+  });
+});
+
+function expressJson() {
+  const express = require('express');
+  return express.json();
+}
+
+module.exports = {};
+</file>
+
+<file path="srv/service.cds">
+using { sap.kfz as kfz } from '../db/schema';
+
+service KfzService @(path:'/service/kfz') {
+  entity Insured   as projection on kfz.Insured;
+  entity Policy    as projection on kfz.Policy;
+  entity Vehicle   as projection on kfz.Vehicle;
+  @odata.draft.enabled
+  entity Claim     as projection on kfz.Claim;
+  entity Email     as projection on kfz.Email;
+  entity Document  as projection on kfz.Document;
+  entity Task      as projection on kfz.Task;
+
+  type ChatResponse { response : LargeString; }
+  action callLLM(prompt : String) returns ChatResponse;
+}
+</file>
+
+<file path="srv/service.js">
+// .env loading optional; CAP usually injects env via process environment
+
+const escapeHtml = (str = '') => String(str)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/\"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
+function buildHtmlResponse(title, bodyHtml) {
+  return [
+    '<section style="font-family:Arial,Helvetica,sans-serif">',
+    `<h3>${escapeHtml(title)}</h3>`,
+    bodyHtml,
+    '</section>'
+  ].join('\n');
+}
+
+async function callSAPGenAIHubViaLangChain(prompt) {
+  const { AzureOpenAiChatClient } = await import('@sap-ai-sdk/langchain');
+  const destinationName = process.env.AI_DESTINATION_NAME || 'aicore-destination';
+  const modelName = process.env.AI_MODEL_NAME || 'gpt-4.1';
+
+  const chat = new AzureOpenAiChatClient(
+    { modelName, temperature: 0.3 },
+    { destinationName }
+  );
+
+  const res = await chat.invoke(String(prompt || ''));
+  const content = typeof res.content === 'string'
+    ? res.content
+    : Array.isArray(res.content)
+      ? res.content.map(part => (typeof part === 'string' ? part : part?.text || '')).join('')
+      : '';
+  return String(content || '').trim();
+}
+
+module.exports = async (srv) => {
+  srv.on('callLLM', async (req) => {
+    const { prompt } = req.data || {};
+
+    try {
+      const answer = await callSAPGenAIHubViaLangChain(prompt);
+      const safeAnswer = escapeHtml(answer);
+      const html = buildHtmlResponse('AI Antwort (GPT-4.1 via SAP GenAI LangChain)', `<pre style=\"white-space:pre-wrap\">${safeAnswer}</pre>`);
+      return { response: html };
+    } catch (e) {
+      const reason = e && e.message ? e.message : String(e);
+      const html = buildHtmlResponse('AI Fehler', [
+        '<p>Die Anfrage an SAP GenAI (LangChain, AzureOpenAiChatClient) ist fehlgeschlagen.</p>',
+        `<p><b>Grund:</b> ${escapeHtml(reason)}</p>`,
+        '<p>Bitte prüfen:</p>',
+        '<ul>',
+        '<li>Destination \"aicore-destination\" existiert im BTP Destination Service.</li>',
+        '<li>Lokale Bindings vorhanden (cds bind destination/aicore) für Hybrid.</li>',
+        '<li>Ausgehende Netzwerkverbindung ist erlaubt.</li>',
+        '</ul>'
+      ].join(''));
+      return { response: html };
+    }
+  });
+};
+</file>
+
+<file path="app/claims/webapp/Component.js">
+sap.ui.define([
+    "sap/fe/core/AppComponent"
+], function (AppComponent) {
+    "use strict";
+
+    return AppComponent.extend("de.claimpilot.claims.Component", {
+        metadata: { manifest: "json" },
+
+        // Externe Referenzen (optional von außen gesetzt)
+        _oChatModelExternal: null,
+        _oDynamicSideContentExternal: null,
+        _aiSendFunctionFromCustomAction: null,
+        _aiSendThisArg: null,
+
+        init: function () {
+            AppComponent.prototype.init.apply(this, arguments);
+        },
+
+        // Wird von main.js oder anderen Stellen aufgerufen
+        setExternalDependencies: function (oChatModel, oDynamicSideContent) {
+            this._oChatModelExternal = oChatModel;
+            this._oDynamicSideContentExternal = oDynamicSideContent;
+        },
+
+        getChatModel: function () {
+            return this._oChatModelExternal || (window.claimpilotChat && window.claimpilotChat.model) || null;
+        },
+
+        getDynamicSideContent: function () {
+            return this._oDynamicSideContentExternal || (window.claimpilotChat && window.claimpilotChat.panel) || null;
+        },
+
+        getAISendFunction: function () {
+            return this._aiSendFunctionFromCustomAction || (window.claimpilotChat && window.claimpilotChat.sendPrompt) || null;
+        },
+
+        // Wird von CustomActions.js aufgerufen, um die Sende-Logik zu registrieren
+        registerAISendFunction: function (fnSend, thisArg) {
+            if (typeof fnSend === 'function') {
+                this._aiSendFunctionFromCustomAction = fnSend;
+                this._aiSendThisArg = thisArg || null; // ExtensionAPI-Kontext optional
+                return true;
+            }
+            return false;
+        },
+
+        openChat: function () {
+            var panel = this.getDynamicSideContent();
+            if (panel && typeof panel.setVisible === 'function') {
+                panel.setVisible(true);
+            }
+        },
+
+        sendAI: function (prompt, oChatModelToUpdate) {
+            var fn = this.getAISendFunction();
+            if (typeof fn === 'function') {
+                // Wenn CustomAction registriert ist, zwei Parameter unterstützen und this-Kontext respektieren
+                if (fn === this._aiSendFunctionFromCustomAction) {
+                    try {
+                        var res = this._aiSendFunctionFromCustomAction.call(this._aiSendThisArg || null, prompt, oChatModelToUpdate);
+                        return (res && typeof res.then === 'function') ? res : Promise.resolve(res);
+                    } catch (e) {
+                        return Promise.reject(e);
+                    }
+                }
+                // Fallback auf globalen sendPrompt(prompt)
+                var out = fn(prompt);
+                return (out && typeof out.then === 'function') ? out : Promise.resolve(out);
+            }
+            return Promise.reject(new Error('AI Send-Funktion nicht verfügbar'));
+        },
+
+        // Wird von main.js (ChatFragmentController) aufgerufen
+        invokeAIActionOnCurrentPage: function (sPrompt, oChatModelToUpdate) {
+            var self = this;
+            var text = (sPrompt == null ? "" : String(sPrompt)).trim();
+            if (!text) { return Promise.resolve(null); }
+
+            // Panel sichtbar machen
+            this.openChat();
+
+            // Optional: externes ChatModel (wenn übergeben) mitführen
+            var placeholderIndex = -1;
+            if (oChatModelToUpdate && typeof oChatModelToUpdate.getData === 'function') {
+                try {
+                    var data = oChatModelToUpdate.getData();
+                    data.messages = data.messages || [];
+                    data.messages.push({ role: 'user', text: text, ts: Date.now() });
+                    data.messages.push({ role: 'assistant', text: '<i>Thinking...</i>', ts: Date.now() });
+                    placeholderIndex = data.messages.length - 1;
+                    oChatModelToUpdate.updateBindings(true);
+                } catch (e) { /* ignore */ }
+            }
+
+            // Wenn eine CustomAction-Implementierung registriert ist, diese zuerst verwenden und Kontext/Argumente beibehalten
+            if (this._aiSendFunctionFromCustomAction) {
+                try {
+                    var customRes = this._aiSendFunctionFromCustomAction.call(this._aiSendThisArg || null, text, oChatModelToUpdate);
+                    return (customRes && typeof customRes.then === 'function') ? customRes : Promise.resolve(customRes);
+                } catch (errCall) {
+                    return Promise.reject(errCall);
+                }
+            }
+
+            var fnSend = (window.claimpilotChat && window.claimpilotChat.sendPrompt) || null;
+            if (typeof fnSend !== 'function') { return Promise.reject(new Error('AI Send-Funktion nicht verfügbar')); }
+
+            return fnSend(text)
+                .then(function (html) {
+                    if (oChatModelToUpdate && placeholderIndex >= 0) {
+                        try {
+                            var d = oChatModelToUpdate.getData();
+                            d.messages[placeholderIndex] = { role: 'assistant', text: html || '<i>Keine Antwort</i>', ts: Date.now() };
+                            oChatModelToUpdate.updateBindings(true);
+                        } catch (e) { /* ignore */ }
+                    }
+                    return html;
+                })
+                .catch(function (err) {
+                    if (oChatModelToUpdate && placeholderIndex >= 0) {
+                        try {
+                            var d2 = oChatModelToUpdate.getData();
+                            d2.messages[placeholderIndex] = { role: 'assistant', text: '<b>Fehler:</b> ' + (err && err.message || err), ts: Date.now() };
+                            oChatModelToUpdate.updateBindings(true);
+                        } catch (e) { /* ignore */ }
+                    }
+                    throw err;
+                });
+        }
+    });
+});
+</file>
+
+<file path="app/claims/webapp/ext/ChatSidePanelContent.fragment.xml">
+<core:FragmentDefinition
+    xmlns="sap.m"
+    xmlns:core="sap.ui.core"
+    xmlns:l="sap.ui.layout"
+    xmlns:html="http://www.w3.org/1999/xhtml">
+
+    <VBox width="100%" height="100%" class="cpChatSidePanel" renderType="Bare">
+        <Toolbar>
+            <Title text="PureAI"/>
+            <ToolbarSpacer/>
+            <Button
+                icon="sap-icon://stop"
+                type="Transparent"
+                tooltip="Streaming stoppen"
+                visible="{chat>/isStreaming}"
+                press="onStopStreaming"/>
+        </Toolbar>
+
+        <!-- Suggestions (visible when not streaming and initial state) -->
+        <HBox
+            width="100%"
+            visible="{chat>/showSuggestions}"
+            class="cp-suggestions"
+            wrap="Wrap"
+            items="{chat>/suggestions}">
+            <items>
+                <Button text="{chat>text}" type="Default" press="onSuggestionPress" class="cp-suggestion-btn"/>
+            </items>
+        </HBox>
+
+        <ScrollContainer id="chatHistoryScrollContainerInSidePanel" width="100%" height="100%" vertical="true">
+            <VBox width="100%" class="cp-chat-container">
+                <List
+                    id="chatHistoryList"
+                    items="{chat>/chatHistory}"
+                    width="100%"
+                    inset="false"
+                    showSeparators="None">
+                    <CustomListItem>
+                        <HBox width="100%"
+                             justifyContent="{= ${chat>type} === 'user' ? 'End' : 'Start'}"
+                             alignItems="Start"
+                             class="{= ${chat>groupStart} ? 'cp-bubble-wrapper cp-group-start' : 'cp-bubble-wrapper'}">
+                            <!-- User bubble (fixed classes) -->
+                            <VBox class="cp-bubble cp-user" renderType="Bare" visible="{= ${chat>type} === 'user' }">
+                                <FormattedText htmlText="{chat>text}"/>
+                            </VBox>
+                            <!-- Assistant bubble (fixed classes) -->
+                            <VBox class="cp-bubble cp-assistant" renderType="Bare" visible="{= ${chat>type} !== 'user' }">
+                                <FormattedText htmlText="{chat>text}"/>
+                            </VBox>
+                            <Button
+                                icon="sap-icon://copy"
+                                type="Transparent"
+                                tooltip="Text kopieren"
+                                visible="{= ${chat>type} !== 'user' }"
+                                press="onCopyMessage"
+                                class="cp-bubble-actions"/>
+                        </HBox>
+                    </CustomListItem>
+                </List>
+            </VBox>
+        </ScrollContainer>
+
+        <HBox class="modernInputRow" alignItems="End">
+            <VBox width="100%">
+                <TextArea
+                    id="chatInputField"
+                    value="{chat>/userInput}"
+                    placeholder="Nachricht an PureAI..."
+                    rows="3"
+                    width="100%"
+                    growing="true"
+                    growingMaxLines="6"/>
+            </VBox>
+            <Button
+                id="sendButton"
+                icon="sap-icon://paper-plane"
+                type="Emphasized"
+                enabled="{= !${chat>/isStreaming} }"
+                press="onSendChatMessageInSidePanel"/>
+        </HBox>
+    </VBox>
+
+</core:FragmentDefinition>
+</file>
+
+<file path="app/claims/webapp/manifest.json">
+{
+  "_version": "1.65.0",
+  "sap.app": {
+    "id": "de.claimpilot.claims",
+    "type": "application",
+    "i18n": "i18n/i18n.properties",
+    "applicationVersion": {
+      "version": "0.0.1"
+    },
+    "title": "{{appTitle}}",
+    "description": "{{appDescription}}",
+    "resources": "resources.json",
+    "sourceTemplate": {
+      "id": "@sap/generator-fiori:lrop",
+      "version": "1.17.5",
+      "toolsId": "3bde6ff6-fdea-4c96-8dfa-bf3e831c2b1b"
+    },
+    "dataSources": {
+      "mainService": {
+        "uri": "/service/kfz/",
+        "type": "OData",
+        "settings": {
+          "annotations": [],
+          "odataVersion": "4.0"
+        }
+      }
+    }
+  },
+  "sap.ui": {
+    "technology": "UI5",
+    "icons": {
+      "icon": "",
+      "favIcon": "",
+      "phone": "",
+      "phone@2": "",
+      "tablet": "",
+      "tablet@2": ""
+    },
+    "deviceTypes": {
+      "desktop": true,
+      "tablet": true,
+      "phone": true
+    }
+  },
+  "sap.ui5": {
+    "flexEnabled": true,
+    "dependencies": {
+      "minUI5Version": "1.139.0",
+      "libs": {
+        "sap.m": {},
+        "sap.ui.core": {},
+        "sap.fe.templates": {},
+        "sap.ui.layout": {}
+      }
+    },
+    "contentDensities": {
+      "compact": true,
+      "cozy": true
+    },
+    "models": {
+      "i18n": {
+        "type": "sap.ui.model.resource.ResourceModel",
+        "settings": {
+          "bundleName": "de.claimpilot.claims.i18n.i18n"
+        }
+      },
+      "": {
+        "dataSource": "mainService",
+        "preload": true,
+        "settings": {
+          "operationMode": "Server",
+          "autoExpandSelect": true,
+          "earlyRequests": true
+        }
+      },
+      "@i18n": {
+        "type": "sap.ui.model.resource.ResourceModel",
+        "uri": "i18n/i18n.properties"
+      }
+    },
+    "resources": {
+      "css": [ { "uri": "css/chat.css" } ]
+    },
+    "routing": {
+      "config": {},
+      "routes": [
+        {
+          "pattern": ":?query:",
+          "name": "ClaimList",
+          "target": "ClaimList"
+        },
+        {
+          "pattern": "Claim({key}):?query:",
+          "name": "ClaimObjectPage",
+          "target": "ClaimObjectPage"
+        }
+      ],
+      "targets": {
+        "ClaimList": {
+          "type": "Component",
+          "id": "ClaimList",
+          "name": "sap.fe.templates.ListReport",
+          "options": {
+            "settings": {
+              "contextPath": "/Claim",
+              "variantManagement": "Page",
+              "content": {
+                "header": {}
+              },
+              "navigation": {
+                "Claim": {
+                  "detail": {
+                    "route": "ClaimObjectPage"
+                  }
+                }
+              },
+              "controlConfiguration": {
+                "@com.sap.vocabularies.UI.v1.LineItem": {
+                  "tableSettings": {
+                    "type": "ResponsiveTable",
+                    "creationMode": { "name": "NewPage" },
+                    "personalization": { "column": true, "sort": true, "filter": true },
+                    "initialVisibleFields": "claimNumber,policy.policyNumber,vehicle.plate,lossDate,status,severity,reportedDate"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "ClaimObjectPage": {
+          "type": "Component",
+          "id": "ClaimObjectPage",
+          "name": "sap.fe.templates.ObjectPage",
+          "options": {
+            "settings": {
+              "editableHeaderContent": false,
+              "contextPath": "/Claim",
+              "content": {
+                "header": {},
+                "footer": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "sap.fiori": {
+    "registrationIds": [],
+    "archeType": "transactional"
+  }
+}
+</file>
+
+<file path="app/claims/webapp/index.html">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>Schadenmeldungen</title>
+    <style>
+        html, body, body > div, #container, #container-uiarea {
+            height: 100%;
+        }
+        /* Reserve space for the always-open side panel */
+        body {
+            padding-right: 440px;
+        }
+        /* Container and layout */
+        .cp-chat-container { max-width: 42rem; margin: 0 auto; padding: 0 12px; }
+        /* Chat bubble styles */
+        .cp-bubble { box-sizing: border-box; padding: 0.6rem 0.8rem; border-radius: 0.75rem; word-wrap: break-word; margin: 6px 8px; line-height: 1.5; }
+        .cp-bubble.sapMFlexBox { display: inline-block !important; }
+        .cp-user { background: #e9f0ff; color: #1b1f24; border-radius: 1rem 1rem .375rem 1rem; max-width: 60%; }
+        .cp-assistant { background: #ffffff; border: 1px solid #e5e7eb; box-shadow: 0 1px 2px rgba(0,0,0,.04); border-radius: .75rem .75rem .75rem .25rem; }
+        .cp-bubble-wrapper { max-width: 100%; }
+        .cp-group-start { margin-top: .6rem; }
+        .cp-bubble-actions { margin-left: .25rem; opacity: 0; transition: opacity .15s ease-in-out; }
+        .cp-bubble:hover + .cp-bubble-actions { opacity: 1; }
+        .cp-suggestions { max-width: 42rem; margin: .25rem auto; padding: .5rem 12px; display: flex; gap: .5rem; }
+        .cp-suggestion-btn { border-radius: 999px; background: #f3f4f6; border: 1px solid #e5e7eb; padding: .25rem .6rem; font-weight: 500; }
+        /* Markdown/code rendering inside bubbles */
+        .cp-bubble pre { background: #0f172a; color: #e5e7eb; padding: 0.625rem; border-radius: 0.5rem; overflow: auto; margin: .5rem 0; }
+        .cp-bubble code { background: #f2f2f3; padding: 0.1rem 0.25rem; border-radius: 0.25rem; }
+        .cp-bubble p { margin: 0.3rem 0; }
+        .cp-bubble h1, .cp-bubble h2, .cp-bubble h3 { margin: 0.25rem 0; font-weight: 600; }
+        .cp-bubble h1 { font-size: 1.125rem; }
+        .cp-bubble h2 { font-size: 1.0625rem; }
+        .cp-bubble h3 { font-size: 1rem; }
+        .cp-bubble h4 { font-size: 0.95rem; margin: 0.25rem 0; font-weight: 600; }
+        .cp-bubble h5 { font-size: 0.9rem; margin: 0.25rem 0; font-weight: 600; }
+        .cp-bubble h6 { font-size: 0.85rem; margin: 0.25rem 0; font-weight: 600; }
+        .cp-bubble hr { border: none; border-top: 1px solid #e5e7eb; margin: .5rem 0; }
+        .cp-bubble a { color: #2563eb; text-decoration: underline; }
+        .cp-bubble .cp-li { display: block; margin: 2px 0; }
+        .cp-bubble .cp-li-num { display: block; margin: 2px 0; }
+        .cp-bubble .cp-list { margin: .25rem 0; padding-left: .5rem; }
+        .cp-bubble .cp-quote { border-left: 3px solid #e5e7eb; padding-left: .5rem; margin: .35rem 0; color: #4b5563; background: #fafafa; border-radius: .25rem; }
+    </style>
+    <script
+        id="sap-ui-bootstrap"
+        src="https://sapui5.hana.ondemand.com/1.139.0/resources/sap-ui-core.js"
+        data-sap-ui-theme="sap_horizon"
+        data-sap-ui-resourceroots='{
+            "de.claimpilot.claims": "./"
+        }'
+        data-sap-ui-compatVersion="edge"
+        data-sap-ui-async="true"
+        data-sap-ui-frameOptions="trusted"
+    ></script>
+    <script>
+        sap.ui.getCore().attachInit(function() {
+            sap.ui.require(["de/claimpilot/claims/main"], function(main) {
+                if (main && typeof main.init === 'function') {
+                    main.init();
+                }
+            });
+        });
+    </script>
+</head>
+<body class="sapUiBody sapUiSizeCompact" id="content">
+    <div id="appHost" style="height: 100%; width: 100%"></div>
+</body>
+</html>
+</file>
+
+<file path="package.json">
+{
+  "name": "claimpilot-cap-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CAP Backend for ClaimPilot (KFZ) without Fiori Elements",
+  "scripts": {
+    "start": "cds-serve",
+    "watch": "cds watch",
+    "watch:hybrid": "cds watch --profile hybrid --port 9999",
+    "watch:autoport": "cds watch --profile hybrid --port 0",
+    "watch-claims": "cds watch --open claims/webapp/index.html?sap-ui-xx-viewCache=false",
+    "test:chat": "node scripts/test-chat.js",
+    "test:chat:raw": "node scripts/sse-debug.js"
+  },
+  "dependencies": {
+    "@sap-ai-sdk/langchain": "^1.14.0",
+    "@sap-cloud-sdk/connectivity": "^3",
+    "@sap-cloud-sdk/http-client": "^3",
+    "@sap-cloud-sdk/resilience": "^3",
+    "@sap/cds": "^8.9.4",
+    "dotenv": "^16.6.1",
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "@sap/cds-dk": "^8.9.4",
+    "sqlite3": "^5.1.7"
+  },
+  "cds": {
+    "odata": {
+      "version": "v4"
+    },
+    "features": {
+      "odata_new_parser": true
+    },
+    "requires": {
+      "db": {
+        "kind": "sqlite",
+        "credentials": {
+          "database": "sqlite.db"
+        }
+      }
+    },
+    "server": {
+      "port": 9999
+    }
+  },
+  "sapux": [
+    "app/claims"
+  ]
+}
+</file>
+
+<file path="app/claims/webapp/main.js">
+sap.ui.define([
+  "sap/ui/core/Component",
+  "sap/ui/core/ComponentContainer",
+  "sap/ui/layout/Splitter",
+  "sap/ui/layout/SplitterLayoutData",
+  "sap/ui/core/Fragment",
+  "sap/ui/model/json/JSONModel",
+  "sap/m/App",
+  "sap/m/Page",
+  "sap/m/Panel"
+], function (Component, ComponentContainer, Splitter, SplitterLayoutData, Fragment, JSONModel, App, Page, Panel) {
+  "use strict";
+
+  const chatManager = {
+    chatModel: null,
+    feAppComponentInstance: null,
+    rightPane: null,
+    _currentAbortController: null,
+
+    // Render a safe, readable HTML from LLM markdown/plain responses
+    // opts: { autoParagraphMode: 'fallback' | 'never' }
+    renderMarkdownToHtml: function (input, opts) {
+      const autoParagraphMode = (opts && opts.autoParagraphMode) || 'fallback';
+      const escapeHtml = (s) => String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
+      if (input == null) return "";
+      let src = String(input).replace(/\r\n/g, "\n");
+
+      // Extract fenced code blocks first (```lang\n...```) and ~~~ blocks
+      const blocks = [];
+      src = src.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (m, lang, code) => {
+        const idx = blocks.push({ lang: lang || "", code }) - 1;
+        return `[[[CODE_BLOCK_${idx}]]]`;
+      });
+      src = src.replace(/~~~([a-zA-Z0-9_-]*)\n([\s\S]*?)~~~/g, (m, lang, code) => {
+        const idx = blocks.push({ lang: lang || "", code }) - 1;
+        return `[[[CODE_BLOCK_${idx}]]]`;
+      });
+
+      // Pre-escape normalization to honor real paragraph cues
+      // 1) Inline horizontal rule markers like ":---" → add newlines around
+      src = src.replace(/\s*---\s*/g, '\n---\n');
+      // 2) New paragraph when a sentence ends followed by a German opening quote „
+      src = src.replace(/([\.!?])\s*„/g, '$1\n\n„');
+
+      // Normalize before escaping: promote single newline after sentence end to paragraph (fallback mode only)
+      if (autoParagraphMode !== 'never') {
+        src = src.replace(/([\.!?])\n(\s*[A-ZÄÖÜ0-9])/g, '$1\n\n$2');
+      }
+
+      // Heuristic auto-paragraphing for long plain text (no existing paragraphs/lists)
+      const autoParagraph = (text) => {
+        if (/\n\n/.test(text)) return text;
+        if (/(^|\n)\s*(?:[-*]\s+|\d+[\.)]\s+)/m.test(text)) return text; // skip if list markers present
+        let out = '';
+        let i = 0;
+        let sentencesInPara = 0;
+        let paraStartLen = 0;
+        const isUpper = (ch) => /[A-ZÄÖÜ]/.test(ch || '');
+        while (i < text.length) {
+          const ch = text[i];
+          out += ch;
+          if (ch === '.' || ch === '!' || ch === '?') {
+            // collect following whitespace
+            let j = i + 1; let ws = '';
+            while (j < text.length && /\s/.test(text[j])) { ws += text[j]; j++; }
+            const next = text[j];
+            if (isUpper(next)) {
+              sentencesInPara++;
+              const paraLen = out.length - paraStartLen;
+              const insertBreak = sentencesInPara >= 3 || paraLen >= 240;
+              out += insertBreak ? "\n\n" : " ";
+              if (insertBreak) { sentencesInPara = 0; paraStartLen = out.length; }
+              i = j; // skip consumed whitespace
+              continue;
+            }
+          }
+          i++;
+        }
+        return out;
+      };
+
+      if (autoParagraphMode !== 'never') {
+        src = autoParagraph(src);
+      }
+
+      // Escape remaining HTML
+      let html = escapeHtml(src);
+
+      // Horizontal rule markers
+      html = html.replace(/(^|\n)\s*[-*_]{3,}\s*(?=\n|$)/g, '$1<hr/>');
+
+      // Inline code
+      html = html.replace(/`([^`]+)`/g, (m, c) => `<code>${c}</code>`);
+
+      // Basic bold (**text**) → use <strong>
+      html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      // Basic italic with underscores _text_
+      html = html.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1<em>$2</em>');
+
+      // Insert line breaks before inline-numbered bullets like ":1. ", ".2. " when not at start of line
+      html = html.replace(/([:\.\)!\]])(\s*)(\d+\.\s+)/g, '$1\n$3');
+      // Also before inline hyphen bullets like ":- "
+      html = html.replace(/([:\.\)!\]])(\s*)(-\s+)/g, '$1\n$3');
+
+      // Headings (# ...)
+      html = html.replace(/(^|\n)######\s+(.+?)(?=\n|$)/g, '$1<h6>$2<\/h6>');
+      html = html.replace(/(^|\n)#####\s+(.+?)(?=\n|$)/g, '$1<h5>$2<\/h5>');
+      html = html.replace(/(^|\n)####\s+(.+?)(?=\n|$)/g, '$1<h4>$2<\/h4>');
+      html = html.replace(/(^|\n)###\s+(.+?)(?=\n|$)/g, '$1<h3>$2<\/h3>');
+      html = html.replace(/(^|\n)##\s+(.+?)(?=\n|$)/g, '$1<h2>$2<\/h2>');
+      html = html.replace(/(^|\n)#\s+(.+?)(?=\n|$)/g, '$1<h1>$2<\/h1>');
+
+      // Linkify URLs
+      html = html.replace(/(https?:\/\/[^\s<]+[^<\.,:;"')\]\s])/g, '<a href="$1" target="_blank" rel="noreferrer noopener">$1</a>');
+
+      // Ensure bold headings are visually separated when jammed inline (strong)
+      html = html.replace(/([:\.\!\?])\s*<strong>/g, '$1<br/><br/><strong>');
+      html = html.replace(/<\/strong>(\S)/g, '</strong><br/><br/>$1');
+
+      // Line formatting: group consecutive bullets and quotes into readable blocks; avoid <ul>/<ol>
+      const lineify = (text) => {
+        const lines = text.split(/\n/);
+        const out = [];
+        let list = [];
+        let quote = [];
+        const flushList = () => {
+          if (!list.length) return;
+          const body = list.join('<br/>');
+          out.push(`<p>${body}</p>`);
+          list = [];
+        };
+        const flushQuote = () => {
+          if (!quote.length) return;
+          const body = quote.join('<br/>');
+          out.push(`<blockquote>${body}</blockquote>`);
+          quote = [];
+        };
+        for (let raw of lines) {
+          const line = raw; // already escaped
+          if (/^\s*-\s+/.test(line)) {
+            flushQuote();
+            const content = line.replace(/^\s*-\s+/, '');
+            list.push(`• ${content}`);
+            continue;
+          }
+          if (/^\s*\d+[\.)]\s+/.test(line)) {
+            flushQuote();
+            list.push(`${line.trim()}`);
+            continue;
+          }
+          if (/^\s*>\s+/.test(line)) {
+            flushList();
+            const content = line.replace(/^\s*>\s+/, '');
+            quote.push(content);
+            continue;
+          }
+          // non-bullet/quote line
+          flushList(); flushQuote();
+          if (line.trim() === '') {
+            out.push(''); // will become paragraph gap
+          } else {
+            const trimmed = line.trim();
+            if (trimmed === '<hr/>' || /^<h[1-6][^>]*>.*<\/h[1-6]>$/.test(trimmed)) {
+              out.push(trimmed);
+            } else {
+              out.push(`<p>${line}</p>`);
+            }
+          }
+        }
+        flushList(); flushQuote();
+        return out.join('');
+      };
+      html = lineify(html);
+
+      // Line breaks: only apply if keine Block-Tags vorhanden (sonst entfernen)
+      if (!/(<p|<blockquote|<hr\/?|<h[1-6])/i.test(html)) {
+        html = html.replace(/\n\n+/g, '<br/><br/>' );
+        html = html.replace(/\n/g, '<br/>' );
+      } else {
+        html = html.replace(/\n+/g, '');
+      }
+
+      // Post-process: if a paragraph begins with a strong title followed by two <br/>, split into separate paragraphs
+      html = html.replace(/<p><strong>([^<]+)<\/strong><br\/><br\/>/g, '<p><strong>$1<\/strong><\/p><p>');
+
+      // Restore fenced code blocks (escaped inside)
+      html = html.replace(/\[\[\[CODE_BLOCK_(\d+)\]\]\]/g, (m, i) => {
+        const blk = blocks[Number(i)] || { lang: '', code: '' };
+        const content = escapeHtml(blk.code);
+        return `<pre><code data-lang="${blk.lang}">${content}</code></pre>`;
+      });
+
+      return html;
+    },
+
+    initModel: function () {
+      this.chatModel = new JSONModel({
+        chatHistory: [
+          // initial welcome message removed
+        ],
+        userInput: "",
+        isTyping: false,
+        isStreaming: false,
+        statusMessage: "",
+        showSuggestions: false,
+        suggestions: [
+          { text: "Fasse den aktuellen Vorgang zusammen" },
+          { text: "Welche fehlenden Unterlagen brauche ich?" },
+          { text: "Erzeuge eine Kundenmail" },
+          { text: "Erkläre die Entscheidung" }
+        ]
+      });
+    },
+
+    addMessage: function (type, text) {
+      const history = this.chatModel.getProperty("/chatHistory");
+      const prev = history[history.length - 1];
+      const groupStart = !prev || prev.type !== type;
+      history.push({ type, text, groupStart });
+      this.chatModel.setProperty("/chatHistory", history);
+      this.chatModel.refresh(true);
+      setTimeout(function () {
+        try {
+          const sc = sap.ui.core.Fragment.byId("chatSidePanelFragmentGlobal", "chatHistoryScrollContainerInSidePanel");
+          sc && sc.scrollTo(0, 99999, 200);
+        } catch (e) { /* ignore */ }
+      }, 100);
+    },
+
+    sendViaODataAction: async function (prompt) {
+      if (!this.feAppComponentInstance) {
+        throw new Error("FE Component not available");
+      }
+      const oDataModel = this.feAppComponentInstance.getModel();
+      if (!oDataModel) {
+        throw new Error("OData Model not found");
+      }
+      const op = oDataModel.bindContext("/callLLM(...)");
+      op.setParameter("prompt", prompt);
+      await op.execute();
+      const ctx = op.getBoundContext();
+      const result = ctx.getObject();
+      return (result && result.response) || "<i>Keine Antwort</i>";
+    },
+
+    sendViaStreaming: async function (prompt) {
+      const url = "/ai/stream";
+      const ac = new AbortController();
+      this._currentAbortController = ac;
+      this.chatModel.setProperty("/isStreaming", true);
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+        signal: ac.signal
+      });
+      if (!resp.ok || !resp.body) {
+        this.chatModel.setProperty("/isStreaming", false);
+        throw new Error("Streaming Response not OK");
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let accumulated = "";
+      // Deep-Chat-inspired streaming: partial paragraph rendering + throttle
+      let lastParaBoundary = 0; // index in accumulated where the last completed paragraph ends (points to first char after boundary)
+      let renderedPrefixHtml = ""; // cached HTML for completed paragraphs
+      let scheduled = false;
+      let pendingUpdate = false;
+
+      const scheduleRender = () => {
+        if (scheduled) { pendingUpdate = true; return; }
+        scheduled = true;
+        setTimeout(() => {
+          try {
+            // finalize any newly completed paragraphs since lastParaBoundary
+            // treat double newline as paragraph boundary
+            const boundaryRegex = /\n\n+/g;
+            boundaryRegex.lastIndex = lastParaBoundary;
+            let match;
+            while ((match = boundaryRegex.exec(accumulated)) !== null) {
+              const para = accumulated.slice(lastParaBoundary, match.index);
+              if (para) {
+                renderedPrefixHtml += this.renderMarkdownToHtml(para, { autoParagraphMode: 'never' }) + '<br/><br/>';
+              } else {
+                renderedPrefixHtml += '<br/><br/>';
+              }
+              lastParaBoundary = match.index + match[0].length;
+            }
+            const tail = accumulated.slice(lastParaBoundary);
+            const tailHtml = this.renderMarkdownToHtml(tail, { autoParagraphMode: 'never' });
+            const html = renderedPrefixHtml + tailHtml;
+            updateAssistant(html);
+          } finally {
+            scheduled = false;
+            if (pendingUpdate) { pendingUpdate = false; scheduleRender(); }
+          }
+        }, 40); // ~25 FPS
+      };
+
+      // ensure last assistant placeholder exists
+      const history = this.chatModel.getProperty("/chatHistory");
+      if (!history.length || history[history.length - 1].type !== "assistant") {
+        this.addMessage("assistant", "<i>Thinking...</i>");
+      }
+
+      const updateAssistant = (html) => {
+        if (html == null || String(html).trim() === "") return;
+        const h = this.chatModel.getProperty("/chatHistory");
+        h[h.length - 1] = { type: "assistant", text: html };
+        this.chatModel.setProperty("/chatHistory", h);
+        this.chatModel.refresh(true);
+      };
+
+      // Heuristic: insert missing newlines before bullet markers while streaming
+      const normalizeBulletsStreaming = (prev, chunk) => {
+        if (!chunk) return chunk;
+        let s = String(chunk);
+        // If a new chunk starts with a bullet but the previous text didn't end with a newline, insert one
+        try {
+          if (prev && !/\n$/.test(prev) && /^(\s*)(?:[-*]\s+|\d+\.\s+)/.test(s)) {
+            s = "\n" + s;
+          }
+          // Inside the chunk, add a newline before any bullet marker that's not already at line start
+          // Hyphen bullets only (avoid '*' to not break bold markup like '**text**')
+          s = s.replace(/([^\n])(?=-\s+)/g, '$1\n');
+          // Numbered bullets like "1. "
+          s = s.replace(/([^\n])(?=\d+\.\s+)/g, '$1\n');
+        } catch (e) { /* best-effort; ignore */ }
+        return s;
+      };
+
+      try {
+        while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+          // extract one SSE event (without trimming leading spaces in value)
+          let raw = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          if (!raw) continue;
+          if (raw.startsWith("data:")) {
+            let data = raw.slice(5);
+            // Per SSE spec: ignore a single optional space after the colon
+            if (data.startsWith(" ")) data = data.slice(1);
+            if (data.trim() === "[DONE]") { reader.cancel(); break; }
+            // If server sends JSON chunks, try to extract a content field; otherwise append as-is
+            let toAppend = null;
+            if (data.startsWith("{") || data.startsWith("[")) {
+              try {
+                const obj = JSON.parse(data);
+                toAppend = obj.delta || obj.content || obj.text || null;
+              } catch (e) {
+                toAppend = null;
+              }
+            }
+            // Interpret empty data events as line breaks (common with SSE token streams)
+            let piece = (toAppend != null ? toAppend : data);
+            // Apply streaming bullet normalization heuristics
+            piece = normalizeBulletsStreaming(accumulated, piece);
+            accumulated += (piece === "" ? "\n" : piece);
+            scheduleRender();
+          }
+        }
+      }
+        // finalize full render once stream completes
+        // flush any remaining cached paragraphs and tail
+        // recompute to be safe
+        renderedPrefixHtml = ""; lastParaBoundary = 0;
+        const boundaryRegex = /\n\n+/g;
+        let match;
+        while ((match = boundaryRegex.exec(accumulated)) !== null) {
+          const para = accumulated.slice(lastParaBoundary, match.index);
+          renderedPrefixHtml += this.renderMarkdownToHtml(para, { autoParagraphMode: 'never' }) + '<br/><br/>';
+          lastParaBoundary = match.index + match[0].length;
+        }
+        const tail = accumulated.slice(lastParaBoundary);
+        const tailHtml = boundaryRegex.test(accumulated)
+          ? this.renderMarkdownToHtml(tail, { autoParagraphMode: 'never' })
+          : this.renderMarkdownToHtml(tail, { autoParagraphMode: 'fallback' });
+        const finalHtml = renderedPrefixHtml + tailHtml;
+        return { html: finalHtml, text: accumulated };
+      } finally {
+        this.chatModel.setProperty("/isStreaming", false);
+        this.chatModel.setProperty("/showSuggestions", false);
+        this._currentAbortController = null;
+      }
+    }
+  };
+
+  const chatController = {
+    onSendChatMessageInSidePanel: async function (overrideText) {
+      const text = (overrideText != null ? String(overrideText) : (chatManager.chatModel.getProperty("/userInput") || "")).trim();
+      if (!text) { return; }
+      chatManager.chatModel.setProperty("/userInput", "");
+      // Escape user text for safe HTML display in FormattedText
+      const escapeHtml = (s) => String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+      chatManager.addMessage("user", escapeHtml(text));
+      chatManager.addMessage("assistant", "<i>Thinking...</i>");
+      chatManager.chatModel.setProperty("/showSuggestions", false);
+      try {
+        let resp; let usedStreaming = false;
+        try {
+          resp = await chatManager.sendViaStreaming(text);
+          usedStreaming = true;
+        } catch (e) {
+          resp = await chatManager.sendViaODataAction(text);
+        }
+        // replace last thinking message
+        const history = chatManager.chatModel.getProperty("/chatHistory");
+        history.pop();
+        const finalHtml = (usedStreaming && resp && resp.html)
+          ? resp.html
+          : ((typeof resp === 'string' && /\s*</.test(resp)) ? resp : chatManager.renderMarkdownToHtml(resp));
+        // We just removed an assistant placeholder, so this is not a new group
+        history.push({ type: "assistant", text: finalHtml, groupStart: false });
+        chatManager.chatModel.setProperty("/chatHistory", history);
+        chatManager.chatModel.refresh(true);
+      } catch (e) {
+        const history = chatManager.chatModel.getProperty("/chatHistory");
+        history.pop();
+        history.push({ type: "assistant", text: "<b>Fehler:</b> " + (e && e.message || e), groupStart: false });
+        chatManager.chatModel.setProperty("/chatHistory", history);
+        chatManager.chatModel.refresh(true);
+      }
+    },
+
+    onStopStreaming: function () {
+      try {
+        if (chatManager._currentAbortController) {
+          chatManager._currentAbortController.abort();
+        }
+      } catch (e) { /* ignore */ }
+    },
+
+    onCopyMessage: function (oEvent) {
+      try {
+        const ctx = oEvent.getSource().getBindingContext("chat");
+        const text = ctx && ctx.getProperty("text");
+        if (!text) return;
+        const tmp = document.createElement("textarea");
+        tmp.value = text.replace(/<[^>]+>/g, "");
+        document.body.appendChild(tmp);
+        tmp.select();
+        document.execCommand("copy");
+        document.body.removeChild(tmp);
+      } catch (e) { /* ignore */ }
+    },
+
+    onRetryMessage: function (oEvent) {
+      try {
+        const ctx = oEvent.getSource().getBindingContext("chat");
+        const text = ctx && ctx.getProperty("text");
+        if (text) {
+          this.onSendChatMessageInSidePanel(text);
+        }
+      } catch (e) { /* ignore */ }
+    },
+
+    onSuggestionPress: function (oEvent) {
+      const s = oEvent.getSource().getText();
+      chatManager.chatModel.setProperty("/showSuggestions", false);
+      this.onSendChatMessageInSidePanel(s);
+    }
+  };
+
+  async function init() {
+    // Prepare model
+    chatManager.initModel();
+
+    // Load chat panel fragment
+    const chatPanelContent = await Fragment.load({
+      id: "chatSidePanelFragmentGlobal",
+      name: "de.claimpilot.claims.ext.ChatSidePanelContent",
+      controller: chatController
+    });
+
+    // Enable Enter-to-send on the TextArea; ensure latest value is in the model before sending
+    try {
+      const input = sap.ui.core.Fragment.byId("chatSidePanelFragmentGlobal", "chatInputField");
+      if (input && input.attachBrowserEvent) {
+        input.attachBrowserEvent("keydown", function (ev) {
+          if (ev.key === "Enter" && !ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+            ev.preventDefault();
+            try {
+              const val = input.getValue();
+              // Write to bound model first so getProperty sees the latest
+              chatManager.chatModel.setProperty("/userInput", val);
+              // Also trigger the control's change lifecycle for consistency
+              if (typeof input.fireChange === 'function') input.fireChange({ value: val });
+              // Send using the captured value to avoid any race
+              chatController.onSendChatMessageInSidePanel(val);
+            } catch (e) { /* ignore */ }
+          }
+        });
+      }
+    } catch (e) { /* ignore */ }
+
+    // Wrap chat content in a Panel to ensure setVisible and full height
+    const rootContent = Array.isArray(chatPanelContent) ? chatPanelContent[0] : chatPanelContent;
+    chatManager.rightPane = new Panel("chatRightPane", { content: [rootContent], height: "100%" });
+    chatManager.rightPane.setModel(chatManager.chatModel, "chat");
+    chatManager.rightPane.setLayoutData(new SplitterLayoutData({ size: "420px", resizable: true, minSize: 280 }));
+
+    // Create FE component and container (left side)
+    const feComponent = await Component.create({ name: "de.claimpilot.claims", id: "feAppComponentCore" });
+    chatManager.feAppComponentInstance = feComponent;
+    const container = new ComponentContainer({ component: feComponent, height: "100%" });
+
+    // Splitter with two areas: left (FE), right (Chat)
+    const splitter = new Splitter("mainSplitter", { height: "100%" });
+    splitter.addContentArea(container);
+    splitter.addContentArea(chatManager.rightPane);
+
+    // Wire dependencies for FE component (provide chat model and pane)
+    if (feComponent.setExternalDependencies) {
+      feComponent.setExternalDependencies(chatManager.chatModel, chatManager.rightPane);
+    }
+
+    // Mount app
+    const page = new Page("mainAppPage", { showHeader: false, content: [splitter], height: "100%" });
+    const app = new App({ pages: [page], height: "100%" });
+    app.placeAt("appHost");
+
+    // Expose for other modules if needed
+    try { window.claimpilotChat = { model: chatManager.chatModel, panel: chatManager.rightPane, sendPrompt: chatController.onSendChatMessageInSidePanel.bind(chatController) }; } catch (e) {}
+  }
+
+  return { init };
+});
+</file>
+
+</files>
