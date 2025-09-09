@@ -13,17 +13,13 @@
     "test:chat:raw": "node scripts/sse-debug.js"
   },
   "dependencies": {
-    "@langchain/openai": "^0.2.7",
     "@sap-ai-sdk/langchain": "^1.14.0",
     "@sap-cloud-sdk/connectivity": "^3",
     "@sap-cloud-sdk/http-client": "^3",
     "@sap-cloud-sdk/resilience": "^3",
     "@sap/cds": "^8.9.4",
     "dotenv": "^16.6.1",
-    "express": "^4.19.2",
-    "langchain": "^0.2.18",
-    "openai": "^4.57.0",
-    "voca": "^1.4.1"
+    "express": "^4.19.2"
   },
   "devDependencies": {
     "@sap/cds-dk": "^8.9.4",
@@ -33,16 +29,15 @@
     "odata": {
       "version": "v4"
     },
+    "features": {
+      "odata_new_parser": true
+    },
     "requires": {
       "db": {
         "kind": "sqlite",
         "credentials": {
           "database": "sqlite.db"
         }
-      },
-      "gen": {
-        "kind": "odata",
-        "model": "srv/external/gen"
       }
     },
     "server": {
