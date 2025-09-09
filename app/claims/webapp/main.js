@@ -311,9 +311,9 @@ sap.ui.define([
         this.addMessage("assistant", "<i>Thinking...</i>");
       }
 
-      const updateAssistant = (text) => {
+      const updateAssistant = (html) => {
         const h = this.chatModel.getProperty("/chatHistory");
-        h[h.length - 1] = { type: "assistant", text: this.renderMarkdownToHtml(text) };
+        h[h.length - 1] = { type: "assistant", text: html };
         this.chatModel.setProperty("/chatHistory", h);
         this.chatModel.refresh(true);
       };
@@ -424,7 +424,7 @@ sap.ui.define([
         history.pop();
         const finalHtml = (usedStreaming && resp && resp.html)
           ? resp.html
-          : chatManager.renderMarkdownToHtml(resp);
+          : ((typeof resp === 'string' && /\s*</.test(resp)) ? resp : chatManager.renderMarkdownToHtml(resp));
         // We just removed an assistant placeholder, so this is not a new group
         history.push({ type: "assistant", text: finalHtml, groupStart: false });
         chatManager.chatModel.setProperty("/chatHistory", history);

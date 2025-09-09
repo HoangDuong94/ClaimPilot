@@ -79,7 +79,7 @@
       }
     },
     "resources": {
-      "css": []
+      "css": [ { "uri": "css/chat.css" } ]
     },
     "routing": {
       "config": {},
