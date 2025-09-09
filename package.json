@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@sap-ai-sdk/langchain": "^1.14.0",
+    "@modelcontextprotocol/sdk": "^1.17.5",
     "@sap-cloud-sdk/connectivity": "^3",
     "@sap-cloud-sdk/http-client": "^3",
     "@sap-cloud-sdk/resilience": "^3",

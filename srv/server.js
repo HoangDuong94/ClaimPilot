@@ -65,6 +65,40 @@ cds.on('bootstrap', (app) => {
       } catch (_) { /* ignore */ }
     }
   });
+  // Agent endpoint (PoC): orchestrates MCP tool calls and streams SSE
+  app.post('/ai/agent/stream', expressJson(), async (req, res) => {
+    const enabled = process.env.AGENT_ENABLE !== '0';
+    try {
+      const { runAgentStreaming } = require('./agent');
+      const prompt = (req.body && req.body.prompt) || '';
+      const threadId = (req.body && req.body.threadId) || undefined;
+      const mode = (req.body && req.body.mode) || undefined; // ignored in PoC
+      res.status(200);
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders && res.flushHeaders();
+      if (!enabled) {
+        // Feature disabled -> fallback to plain LLM streaming
+        await streamGenAI(prompt, res);
+        return;
+      }
+      await runAgentStreaming({ prompt, threadId, mode, res });
+    } catch (e) {
+      // On any error, fallback to plain LLM (still streamed)
+      try {
+        const prompt = (req.body && req.body.prompt) || '';
+        await streamGenAI(prompt, res, { forceFallback: true });
+      } catch (_) {
+        try {
+          res.write(`event: error\n`);
+          res.write(`data: ${JSON.stringify({ message: e && e.message ? e.message : String(e) })}\n\n`);
+          res.end();
+        } catch (_) { /* ignore */ }
+      }
+    }
+  });
 });
 
 function expressJson() {

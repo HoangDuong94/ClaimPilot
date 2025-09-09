@@ -200,7 +200,16 @@ sap.ui.define([
     },
 
     initModel: function () {
+      const genThreadId = () => {
+        try {
+          const rnd = Math.random().toString(36).slice(2, 10);
+          return 't-' + Date.now().toString(36) + '-' + rnd;
+        } catch (e) {
+          return 't-' + Date.now();
+        }
+      };
       this.chatModel = new JSONModel({
+        threadId: genThreadId(),
         chatHistory: [
           // initial welcome message removed
         ],
@@ -250,14 +259,14 @@ sap.ui.define([
     },
 
     sendViaStreaming: async function (prompt) {
-      const url = "/ai/stream";
+      const url = "/ai/agent/stream";
       const ac = new AbortController();
       this._currentAbortController = ac;
       this.chatModel.setProperty("/isStreaming", true);
       const resp = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, threadId: this.chatModel.getProperty("/threadId") }),
         signal: ac.signal
       });
       if (!resp.ok || !resp.body) {

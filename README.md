@@ -14,3 +14,8 @@ Hinweise
 - Standard-DB ist SQLite (`sqlite.db`). PostgreSQL kann später konfiguriert werden.
 - Fiori Elements wird hier bewusst nicht bereitgestellt; UI-Generierung folgt separat.
 
+Agent (PoC)
+- Neuer SSE-Endpoint: `POST /ai/agent/stream` mit Body `{ "prompt": "...", "threadId": "optional" }`.
+- Streamt Token-Chunks als `data: <text>` und Tool-Events als JSON (`tool_start|tool_end|tool_error`).
+- MCP (Microsoft 365 CLI) wird bevorzugt genutzt; Fallback ist das Plain-LLM.
+- Zum Aktivieren: `AGENT_ENABLE=1` (Default). Optional: `MCP_M365_START_CMD` auf den MCP-Server-Startbefehl setzen.
