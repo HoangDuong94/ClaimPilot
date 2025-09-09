@@ -7,10 +7,8 @@ sap.ui.define([
   "sap/ui/model/json/JSONModel",
   "sap/m/App",
   "sap/m/Page",
-  "sap/m/Bar",
-  "sap/m/Title",
   "sap/m/Panel"
-], function (Component, ComponentContainer, Splitter, SplitterLayoutData, Fragment, JSONModel, App, Page, Bar, Title, Panel) {
+], function (Component, ComponentContainer, Splitter, SplitterLayoutData, Fragment, JSONModel, App, Page, Panel) {
   "use strict";
 
   const chatManager = {
