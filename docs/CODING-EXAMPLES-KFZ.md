@@ -1,3 +1,5 @@
+> Hinweis: Die Markdown-zu-HTML-Konvertierung erfolgt aktuell clientseitig in `app/claims/webapp/main.js`. Ein Backend-Markdown-Converter ist in diesem POC nicht aktiv.
+
 # ClaimPilot – CODING EXAMPLES – Kfz-Schaden (POC)
 
 Diese Datei liefert konkrete, referenzierbare Beispiele für ClaimPilot. Sie führen Schritt für Schritt durch CAP, Fiori Elements, das PureAI‑SidePanel sowie die Agent-Integration mit Excel und Microsoft 365 CLI MCP (m365GetCommands, m365GetCommandDocs, m365RunCommand).

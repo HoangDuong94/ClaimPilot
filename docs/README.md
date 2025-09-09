@@ -1,3 +1,5 @@
+> Hinweis: Die Markdown-zu-HTML-Konvertierung erfolgt aktuell clientseitig in `app/claims/webapp/main.js`. Ein Backend-Markdown-Converter ist in diesem POC nicht aktiv.
+
 # ClaimPilot – Projektübersicht und Leitfaden
 
 ClaimPilot ist ein POC für Kfz‑Schadenmeldungen auf Basis von SAP CAP (Node.js, OData v4, PostgreSQL) und einer Fiori Elements App mit integriertem AI‑Agent (LangChain/LangGraph + MCP‑Tools). Ziel ist es, E‑Mails und Excel‑Anhänge praxisnah zu verarbeiten, Kerndaten zu extrahieren und Workflows zu erleichtern.

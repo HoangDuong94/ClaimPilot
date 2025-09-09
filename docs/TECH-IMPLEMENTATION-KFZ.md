@@ -1,3 +1,5 @@
+> Hinweis: Die Markdown-zu-HTML-Konvertierung erfolgt aktuell clientseitig in `app/claims/webapp/main.js`. Ein Backend-Markdown-Converter ist in diesem POC nicht aktiv.
+
 # ClaimPilot – TECH IMPLEMENTATION – Kfz-Schaden (POC)
 
 Diese Anleitung führt Schritt für Schritt durch den Aufbau einer Kfz‑Schadenmeldungs‑Variante auf Basis dieser Codebasis. Sie deckt CAP‑Setup, Fiori Elements, Chat‑Sidepanel, OData‑Action, Agent‑Integration (Excel + Microsoft 365 CLI MCP) und die GenAI‑Anbindung (package.json/Destination) ab.

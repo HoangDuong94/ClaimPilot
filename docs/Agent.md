@@ -1,3 +1,5 @@
+> Hinweis: Die Markdown-zu-HTML-Konvertierung erfolgt aktuell clientseitig in `app/claims/webapp/main.js`. Ein Backend-Markdown-Converter ist in diesem POC nicht aktiv.
+
 # ClaimPilot – Kfz‑Schaden Agent (Agentic Design, POC)
 
 Diese Datei beschreibt den Agenten so konkret, dass er möglichst deterministisch arbeitet und auf dem vorhandenen Projekt aufsetzt. Sie enthält Beispiele aus diesem Repo, klare Schrittfolgen und feste Tool‑Sequenzen, um Halluzinationen zu vermeiden.
