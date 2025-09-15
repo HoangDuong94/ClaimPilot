@@ -44,7 +44,9 @@ function fetchSSE(url, body) {
 (async () => {
   const prompt = process.argv.slice(2).join(' ') || 'Sag Hallo.';
   const url = process.env.SSE_URL || 'http://localhost:9999/ai/stream';
+  const threadId = process.env.SSE_THREAD_ID;
+  const body = threadId ? { prompt, threadId } : { prompt };
   console.log('Posting to', url, 'prompt=', prompt);
-  await fetchSSE(url, { prompt });
+  if (threadId) console.log('Using threadId:', threadId);
+  await fetchSSE(url, body);
 })();
-

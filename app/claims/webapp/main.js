@@ -35,11 +35,12 @@ sap.ui.define([
       const blocks = [];
       src = src.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (m, lang, code) => {
         const idx = blocks.push({ lang: lang || "", code }) - 1;
-        return `[[[CODE_BLOCK_${idx}]]]`;
+        // Use an underscore-free placeholder so emphasis regexes don't alter it
+        return `[[[CODEBLOCK${idx}]]]`;
       });
       src = src.replace(/~~~([a-zA-Z0-9_-]*)\n([\s\S]*?)~~~/g, (m, lang, code) => {
         const idx = blocks.push({ lang: lang || "", code }) - 1;
-        return `[[[CODE_BLOCK_${idx}]]]`;
+        return `[[[CODEBLOCK${idx}]]]`;
       });
 
       // Pre-escape normalization to honor real paragraph cues
@@ -88,6 +89,9 @@ sap.ui.define([
       if (autoParagraphMode !== 'never') {
         src = autoParagraph(src);
       }
+
+      // Interpret Markdown hard line break (two spaces + newline) as paragraph boundary
+      try { src = src.replace(/ {2}\n/g, '\n\n'); } catch (e) { /* ignore */ }
 
       // Escape remaining HTML
       let html = escapeHtml(src);
@@ -190,7 +194,7 @@ sap.ui.define([
       html = html.replace(/<p><strong>([^<]+)<\/strong><br\/><br\/>/g, '<p><strong>$1<\/strong><\/p><p>');
 
       // Restore fenced code blocks (escaped inside)
-      html = html.replace(/\[\[\[CODE_BLOCK_(\d+)\]\]\]/g, (m, i) => {
+      html = html.replace(/\[\[\[CODEBLOCK(\d+)\]\]\]/g, (m, i) => {
         const blk = blocks[Number(i)] || { lang: '', code: '' };
         const content = escapeHtml(blk.code);
         return `<pre><code data-lang="${blk.lang}">${content}</code></pre>`;
@@ -304,7 +308,7 @@ sap.ui.define([
               lastParaBoundary = match.index + match[0].length;
             }
             const tail = accumulated.slice(lastParaBoundary);
-            const tailHtml = this.renderMarkdownToHtml(tail, { autoParagraphMode: 'never' });
+            const tailHtml = this.renderMarkdownToHtml(tail, { autoParagraphMode: 'fallback' });
             const html = renderedPrefixHtml + tailHtml;
             updateAssistant(html);
           } finally {
@@ -328,19 +332,17 @@ sap.ui.define([
         this.chatModel.refresh(true);
       };
 
-      // Heuristic: insert missing newlines before bullet markers while streaming
+      // Heuristic: insert missing newlines before bullet/number markers while streaming
       const normalizeBulletsStreaming = (prev, chunk) => {
         if (!chunk) return chunk;
         let s = String(chunk);
-        // If a new chunk starts with a bullet but the previous text didn't end with a newline, insert one
         try {
-          if (prev && !/\n$/.test(prev) && /^(\s*)(?:[-*]\s+|\d+\.\s+)/.test(s)) {
+          // If chunk starts with a list marker and previous text didn't end with a newline, prepend one
+          if (prev && !/\n$/.test(prev) && /^(\s*)(?:[-*•]\s+|\d+\.\s+)/.test(s)) {
             s = "\n" + s;
           }
-          // Inside the chunk, add a newline before any bullet marker that's not already at line start
-          // Hyphen bullets only (avoid '*' to not break bold markup like '**text**')
-          s = s.replace(/([^\n])(?=-\s+)/g, '$1\n');
-          // Numbered bullets like "1. "
+          // Insert newline before inline list markers (hyphen/star/bullet and numbered)
+          s = s.replace(/([^\n])(?=(?:[-*•]\s+))/g, '$1\n');
           s = s.replace(/([^\n])(?=\d+\.\s+)/g, '$1\n');
         } catch (e) { /* best-effort; ignore */ }
         return s;
@@ -353,20 +355,28 @@ sap.ui.define([
         buf += decoder.decode(value, { stream: true });
         let idx;
         while ((idx = buf.indexOf("\n\n")) >= 0) {
-          // extract one SSE event (without trimming leading spaces in value)
+          // extract one SSE event block (can contain multiple data: lines)
           let raw = buf.slice(0, idx);
           buf = buf.slice(idx + 2);
           if (!raw) continue;
-          if (raw.startsWith("data:")) {
-            let data = raw.slice(5);
-            // Per SSE spec: ignore a single optional space after the colon
-            if (data.startsWith(" ")) data = data.slice(1);
+          if (/^data:/m.test(raw)) {
+            // Join all data: lines per SSE spec
+            const lines = raw.split(/\r?\n/);
+            let joined = '';
+            for (const ln of lines) {
+              if (!ln.startsWith('data:')) continue;
+              let d = ln.slice(5);
+              if (d.startsWith(' ')) d = d.slice(1);
+              joined += d + '\n';
+            }
+            let data = joined.replace(/\n$/, '');
             if (data.trim() === "[DONE]") { reader.cancel(); break; }
             // If server sends JSON chunks, try to extract a content field; otherwise append as-is
             let toAppend = null;
             if (data.startsWith("{") || data.startsWith("[")) {
               try {
                 const obj = JSON.parse(data);
+                // Only append visible content fields; ignore tool/event JSON payloads
                 toAppend = obj.delta || obj.content || obj.text || null;
               } catch (e) {
                 toAppend = null;

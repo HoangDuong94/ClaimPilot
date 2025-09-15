@@ -6,13 +6,17 @@
   "scripts": {
     "start": "cds-serve",
     "watch": "cds watch",
-    "watch:hybrid": "cds watch --profile hybrid --port 9999",
+    "watch:hybrid": "cds watch --profile hybrid --port ",
     "watch:autoport": "cds watch --profile hybrid --port 0",
     "watch-claims": "cds watch --open claims/webapp/index.html?sap-ui-xx-viewCache=false",
     "test:chat": "node scripts/test-chat.js",
     "test:chat:raw": "node scripts/sse-debug.js"
   },
   "dependencies": {
+    "@langchain/langgraph": "^0.4.9",
+    "@langchain/langgraph-checkpoint": "^0.1.1",
+    "@langchain/mcp-adapters": "^0.6.0",
+    "@langchain/core": "^0.3.75",
     "@sap-ai-sdk/langchain": "^1.14.0",
     "@modelcontextprotocol/sdk": "^1.17.5",
     "@sap-cloud-sdk/connectivity": "^3",
