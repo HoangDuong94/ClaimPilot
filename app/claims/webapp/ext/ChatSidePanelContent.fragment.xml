@@ -9,6 +9,12 @@
             <Title text="PureAI"/>
             <ToolbarSpacer/>
             <Button
+                icon="sap-icon://delete"
+                type="Transparent"
+                tooltip="Chatverlauf löschen"
+                enabled="{= ${chat>/chatHistory}.length > 0 || ${chat>/isStreaming} }"
+                press="onClearChat"/>
+            <Button
                 icon="sap-icon://stop"
                 type="Transparent"
                 tooltip="Streaming stoppen"

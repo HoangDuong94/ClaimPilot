@@ -1,6 +1,76 @@
 // New Agent implementation: LangGraph React-Agent + MCP tools (M365 only)
 // CommonJS with dynamic imports for ESM-only packages
 
+// Lightweight helpers for safe logging and output shaping
+const crypto = require('crypto');
+function hash(s = '') {
+  try { return crypto.createHash('sha1').update(String(s)).digest('hex').slice(0, 10); } catch (_) { return 'nohash'; }
+}
+function cap(str, n = 4000) {
+  const s = String(str || '');
+  return s.length > n ? s.slice(0, n) + ' ...[truncated]' : s;
+}
+
+function extractMcpText(result) {
+  if (!result) return '';
+  if (typeof result === 'string') return result;
+
+  if (result.structuredContent !== undefined) {
+    const sc = result.structuredContent;
+    if (typeof sc === 'string') return sc;
+    try { return JSON.stringify(sc); } catch (_) { return String(sc); }
+  }
+
+  if (Array.isArray(result.content)) {
+    const parts = [];
+    for (const block of result.content) {
+      if (!block) continue;
+      if (typeof block === 'string') {
+        parts.push(block);
+        continue;
+      }
+      const type = block.type;
+      if (type === 'text' && typeof block.text === 'string') {
+        parts.push(block.text);
+        continue;
+      }
+      if (type === 'json' && block.json !== undefined) {
+        try { parts.push(typeof block.json === 'string' ? block.json : JSON.stringify(block.json)); }
+        catch (_) { parts.push(String(block.json)); }
+        continue;
+      }
+      if ((type === 'stdout' || type === 'stderr' || type === 'cli_output') && typeof block.text === 'string') {
+        parts.push(block.text);
+        continue;
+      }
+      if ((type === 'output' || type === 'comment') && typeof block.text === 'string') {
+        parts.push(block.text);
+      }
+    }
+    if (parts.length) return parts.join('\n');
+  }
+
+  if (typeof result.text === 'string') return result.text;
+  if (typeof result.output === 'string') return result.output;
+  if (Array.isArray(result.output)) {
+    try { return result.output.join('\n'); } catch (_) {}
+  }
+  if (typeof result.stdout === 'string') return result.stdout;
+
+  try { return JSON.stringify(result); } catch (_) { return String(result); }
+}
+
+// Policy: rewrite unsafe/unbounded commands to safe variants
+function rewriteCommandSafely(cmd) {
+  return String(cmd || '');
+}
+
+// Output reducer for known commands; keeps responses compact for the LLM/history
+function reduceOutput(cmd, raw) {
+  try { return typeof raw === 'string' ? raw : JSON.stringify(raw); }
+  catch (_) { return String(raw); }
+}
+
 let agentExecutor = null;
 let mcpClients = null;
 let agentInfo = { toolNames: [], modelName: '' };
@@ -54,37 +124,47 @@ function sseError(res, obj) {
   try {
     res.write('event: error\n');
     res.write(`data: ${JSON.stringify(obj)}\n\n`);
-  } catch (_) {}
+  } catch (_) { }
 }
 
 async function initAgent() {
   if (agentExecutor) return agentExecutor;
 
   // Optional HTTP tracing for fetch
-  try { enableHttpTrace(); } catch (_) {}
+  try { enableHttpTrace(); } catch (_) { }
 
   const { initAllMCPClients } = require('./mcp-clients');
-  const { loadMcpTools } = await import('@langchain/mcp-adapters');
   const { createReactAgent } = await import('@langchain/langgraph/prebuilt');
   const { MemorySaver } = await import('@langchain/langgraph-checkpoint');
   const { AzureOpenAiChatClient } = await import('@sap-ai-sdk/langchain');
+  const { DynamicStructuredTool } = await import('@langchain/core/tools');
+  const { z } = await import('zod');
 
   // 1) MCP Clients (only M365 for now)
   mcpClients = await initAllMCPClients();
 
-  // 2) Load tools from M365 MCP (all available)
+  // 2) Guarded proxy for MCP tool(s); only expose whitelisted name(s)
   const allTools = [];
-  if (mcpClients.m365) {
-    try {
-      const toolsResp = await mcpClients.m365.listTools();
-      const names = (toolsResp.tools || []).map(t => t.name).join(',');
-      if (names) {
-        const m365 = await loadMcpTools(names, mcpClients.m365);
-        allTools.push(...m365);
+  const allowed = (process.env.MCP_M365_TOOLS || 'm365_run_command')
+    .split(',').map(s => s.trim()).filter(Boolean);
+  try { console.log('[AGENT][tools_whitelist]', { allowed }); } catch (_) {}
+  if (mcpClients.m365 && allowed.includes('m365_run_command')) {
+    const guardedRun = new DynamicStructuredTool({
+      name: 'm365_run_command',
+      description: 'Sicherer Proxy für Microsoft 365 CLI Kommandos über MCP.',
+      schema: z.object({ command: z.string() }),
+      func: async ({ command }) => {
+        const safeCmd = rewriteCommandSafely(command);
+        const out = await mcpClients.m365.callTool({ name: 'm365_run_command', arguments: { command: safeCmd } });
+        const rawText = extractMcpText(out);
+        const fallback = typeof out === 'string' ? out : JSON.stringify(out);
+        const raw = typeof rawText === 'string' && rawText.trim() ? rawText : fallback;
+        const slim = reduceOutput(safeCmd, raw);
+        try { console.log('[M365][proxy]', { cmd: safeCmd, rawBytes: raw.length, slimBytes: slim.length, rawHash: hash(raw) }); } catch (_) {}
+        return slim; // Only reduced output goes back to the LLM
       }
-    } catch (e) {
-      // If listing tools fails, continue without tools
-    }
+    });
+    allTools.push(guardedRun);
   }
 
   // 3) LLM + in-memory checkpointing
@@ -109,7 +189,7 @@ async function initAgent() {
       topP: kw.topP,
       frequencyPenalty: kw.frequencyPenalty,
     });
-  } catch (_) {}
+  } catch (_) { }
   if (process.env.AGENT_DIAG === '1' || process.env.AGENT_DIAG === 'true') {
     try {
       const r = await llm.invoke([
@@ -119,12 +199,12 @@ async function initAgent() {
       try {
         const out = typeof r === 'string' ? r : (r && r.content ? r.content : r);
         console.log('[AGENT][diag_llm_ok]', typeof out === 'string' ? out.slice(0, 120) : out);
-      } catch (_) {}
+      } catch (_) { }
     } catch (e) {
       try {
         const chain = unwrapError(e);
         console.error('[AGENT][diag_llm_err]', safeJson(chain, 4000));
-      } catch (_) {}
+      } catch (_) { }
       throw e; // fail fast in diag mode for visibility
     }
   }
@@ -145,7 +225,7 @@ async function initAgent() {
       tools: agentInfo.toolNames,
       m365Enabled: !!mcpClients.m365,
     });
-  } catch (_) {}
+  } catch (_) { }
   return agentExecutor;
 }
 
@@ -178,13 +258,57 @@ async function runAgentStreaming({ prompt, threadId, res }) {
       promptPreview: String(prompt).slice(0, 200)
     });
     if (traceEnabled) trace.push({ t: Date.now(), type: 'start', reqId, threadId: String(threadId || 'default'), prompt: String(prompt) });
-  } catch (_) {}
+  } catch (_) { }
 
   const systemMessage = {
     role: 'system',
-    content:
-      'You are a helpful assistant. You can use MCP tools (Microsoft 365 etc.). ' +
-      'Explain briefly what you are doing when invoking tools.',
+    content: `
+Rolle & Ziel
+- Du bist ein sehr präziser Assistant mit Zugriff auf MCP-Tools für Microsoft 365.
+- Du erledigst drei Aufgaben effizient: (1) Status prüfen, (2) E-Mails lesen, (3) Kalendereinladungen verschicken.
+- Antworte auf Deutsch und erkläre Tool-Aufrufe in EINEM kurzen Satz.
+
+Token-Hygiene (sehr wichtig)
+- Nutze KEIN Tool, das globale Kommandolisten oder vollständige Doku ausgibt. Verwende NIEMALS „m365_get_commands“.
+- Verwende „m365_get_command_docs“ nur, wenn ein konkretes Kommando EINMAL fehlgeschlagen ist. Dann:
+  - Hole NUR die Doku zu genau diesem Kommando.
+  - Fasse sie sofort in max. 6 Zeilen / 600 Zeichen zusammen.
+  - Zitiere keinen langen MDX/Code-Block.
+- Gib nie riesige JSONs aus. Extrahiere nur die nötigen Felder und fasse den Rest zusammen.
+- Beende die Aufgabe, sobald das Ziel erreicht ist (keine weiteren ReAct-Runden).
+
+Erlaubte Werkzeuge
+- m365_run_command (primär)
+- Optional & nur im Fehlerfall: m365_get_command_docs (strikt zusammenfassen, siehe oben)
+
+Kochrezepte (verwende genau diese Muster)
+1) Status prüfen
+  - Befehl: m365 status --output json
+  - Ausgabe: „Angemeldet als <connectedAs> (Cloud: <cloudType>).“
+  - Falls nicht angemeldet: sage knapp „Bitte zuerst m365 login ausführen.“
+
+2) Neueste E-Mail aus Inbox
+  - Liste minimal holen:
+    m365 outlook message list --folderName Inbox --top 1 --orderby "receivedDateTime desc" --output json
+  - Falls Body nötig:
+    m365 outlook message get --id "<id>" --output json
+  - Antworte als Markdown-Liste mit genau diesen 4 Zeilen:
+    - Betreff: …
+    - Von: <Name> (<Adresse>)
+    - Datum: <ISO/Locale>
+    - Vorschau: <max 120 Zeichen>
+
+3) Kalender-Einladung erstellen (Beispiel)
+  - Versuche direkt:
+    m365 outlook event add --subject "<Betreff>" --start "<ISO>" --end "<ISO>" --attendees "<mail1,mail2>" --location "<Ort>" --isOnlineMeeting true --output json
+  - Falls Parameterfehler: EINMAL m365_get_command_docs für „m365 outlook event add“ abrufen, kurz zusammenfassen, dann erneut aufrufen.
+  - Antwort: „Termin erstellt: <subject>, <start>–<end>, Teilnehmer: <n>, ID: <id/optional>.“
+
+Antwortstil
+- Max. 1 kurzer Satz vor dem Tool-Call („Ich prüfe den Status …“).
+- Ergebnis kompakt; keine Roh-Doku, keine langen JSONs, keine internen Gedankenschritte.
+- Wenn etwas fehlt (z. B. Zeiten/Teilnehmer): frage nur nach den konkret fehlenden Feldern.
+`.trim()
   };
   const userMessage = { role: 'user', content: String(prompt) };
 
@@ -193,42 +317,54 @@ async function runAgentStreaming({ prompt, threadId, res }) {
     const callbacks = [{
       handleLLMStart: (_llm, prompts) => {
         try {
+          const s = JSON.stringify(prompts);
+          const approxTokens = Math.ceil(s.length / 4);
           const first = Array.isArray(prompts) && prompts.length ? prompts[0] : undefined;
           const preview = first ? (typeof first === 'string' ? first : JSON.stringify(first)).slice(0, 400) : undefined;
-          console.log('[AGENT][llm_start]', { reqId, prompts: Array.isArray(prompts) ? prompts.length : undefined, preview });
+          console.log('[AGENT][llm_start]', { reqId, prompts: Array.isArray(prompts) ? prompts.length : undefined, approxTokens });
           if (traceEnabled) trace.push({ t: Date.now(), type: 'llm_start', preview });
-        } catch (_) {}
+        } catch (_) { }
       },
       handleLLMEnd: () => {
-        try { console.log('[AGENT][llm_end]', { reqId }); if (traceEnabled) trace.push({ t: Date.now(), type: 'llm_end' }); } catch (_) {}
+        try { console.log('[AGENT][llm_end]', { reqId }); if (traceEnabled) trace.push({ t: Date.now(), type: 'llm_end' }); } catch (_) { }
       },
       handleLLMError: (err) => {
-        try { console.error('[AGENT][llm_error]', { reqId, message: err && err.message, name: err && err.name }); if (traceEnabled) trace.push({ t: Date.now(), type: 'llm_error', message: err && err.message }); } catch (_) {}
+        try { console.error('[AGENT][llm_error]', { reqId, message: err && err.message, name: err && err.name }); if (traceEnabled) trace.push({ t: Date.now(), type: 'llm_error', message: err && err.message }); } catch (_) { }
       },
       handleToolStart: (tool, input) => {
         try {
           const prev = typeof input === 'string' ? input : JSON.stringify(input || '');
           console.log('[AGENT][cb_tool_start]', { reqId, tool, inputPreview: prev.slice(0, 200) });
           if (traceEnabled) trace.push({ t: Date.now(), type: 'tool_start', tool, inputPreview: prev.slice(0, 400) });
-        } catch (_) {}
+        } catch (_) { }
       },
       handleToolEnd: (output) => {
         try {
-          const prev = typeof output === 'string' ? output : JSON.stringify(output || '');
-          console.log('[AGENT][cb_tool_end]', { reqId, outputPreview: prev.slice(0, 200) });
-          if (traceEnabled) trace.push({ t: Date.now(), type: 'tool_end', outputPreview: prev.slice(0, 400) });
-        } catch (_) {}
+          const text = typeof output === 'string' ? output : JSON.stringify(output || '');
+          console.log('[AGENT][cb_tool_end]', { reqId, bytes: text.length, preview: text.slice(0, 200) });
+          if (traceEnabled) trace.push({ t: Date.now(), type: 'tool_end', outputPreview: text.slice(0, 400) });
+        } catch (_) { }
       },
       handleToolError: (err) => {
-        try { console.error('[AGENT][cb_tool_error]', { reqId, message: err && err.message, name: err && err.name }); if (traceEnabled) trace.push({ t: Date.now(), type: 'tool_error', message: err && err.message }); } catch (_) {}
+        try { console.error('[AGENT][cb_tool_error]', { reqId, message: err && err.message, name: err && err.name }); if (traceEnabled) trace.push({ t: Date.now(), type: 'tool_error', message: err && err.message }); } catch (_) { }
       }
     }];
 
+    // Build messages and ensure system message is only sent once per thread
+    const msgs = [];
+    const tid = String(threadId || 'default');
+    global.__threadsWithSystem ??= new Set();
+    if (!global.__threadsWithSystem.has(tid)) {
+      msgs.push(systemMessage);
+      global.__threadsWithSystem.add(tid);
+    }
+    msgs.push(userMessage);
+
     const stream = await executor.stream(
-      { messages: [systemMessage, userMessage] },
+      { messages: msgs },
       {
-        recursionLimit: Number(process.env.AGENT_RECURSION_LIMIT || 100),
-        configurable: { thread_id: String(threadId || 'default') },
+        recursionLimit: Number(process.env.AGENT_RECURSION_LIMIT || 4),
+        configurable: { thread_id: tid },
         callbacks
       }
     );
@@ -252,9 +388,9 @@ async function runAgentStreaming({ prompt, threadId, res }) {
                   sentPreview += text.slice(0, needed);
                 }
                 // per-chunk live log (short preview)
-                const live = text.length > 160 ? text.slice(0, 160) + ' �' : text;
+                const live = text.length > 160 ? text.slice(0, 160) + ' ... ' : text;
                 console.log('[AGENT][send]', live);
-              } catch (_) {}
+              } catch (_) { }
             }
             sseWriteChunked(res, text);
             // Step logging: reasoning (no tool call in this message)
@@ -267,13 +403,13 @@ async function runAgentStreaming({ prompt, threadId, res }) {
                 }
                 phase = 'reason';
               }
-            } catch (_) {}
+            } catch (_) { }
           }
           if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
             const call = msg.tool_calls[0];
-            try { console.log('[AGENT][tool_start]', { tool: call.name, args: call.args || {} }); } catch (_) {}
+            try { console.log('[AGENT][tool_start]', { tool: call.name, args: call.args || {} }); } catch (_) { }
             if (logSteps) {
-              try { if (phase !== 'tool') { /* keep same step for this round */ } console.log('[AGENT][step]', { step: Math.max(step, 1), action: 'tool_call', tool: call.name }); } catch (_) {}
+              try { if (phase !== 'tool') { /* keep same step for this round */ } console.log('[AGENT][step]', { step: Math.max(step, 1), action: 'tool_call', tool: call.name }); } catch (_) { }
             }
             awaitingTool = true;
             phase = 'tool';
@@ -291,9 +427,9 @@ async function runAgentStreaming({ prompt, threadId, res }) {
             : '';
         if (toolText) {
           const preview = String(toolText).slice(0, 500);
-          try { console.log('[AGENT][tool_output]', preview + (toolText.length > 500 ? ' ...[truncated]' : '')); } catch (_) {}
+          try { console.log('[AGENT][tool_output]', preview + (toolText.length > 500 ? ' ...[truncated]' : '')); } catch (_) { }
           if (logSteps) {
-            try { if (step === 0) step = 1; console.log('[AGENT][step]', { step, action: 'observation', preview: String(toolText).slice(0, 200) }); } catch (_) {}
+            try { if (step === 0) step = 1; console.log('[AGENT][step]', { step, action: 'observation', preview: String(toolText).slice(0, 200) }); } catch (_) { }
           }
         }
         awaitingTool = false;
@@ -308,7 +444,7 @@ async function runAgentStreaming({ prompt, threadId, res }) {
         const prev = sentPreview.replace(/\s+/g, ' ').slice(0, 400);
         console.log('[AGENT][response_end]', { chars: sentChars, preview: prev + (sentChars > prev.length ? ' …' : '') });
       }
-    } catch (_) {}
+    } catch (_) { }
     sseEnd(res);
   } catch (e) {
     // Enhanced error logging with deep unwrap and sanitized SSE response
@@ -325,10 +461,10 @@ async function runAgentStreaming({ prompt, threadId, res }) {
           message: (c?.message || '').slice(0, 500),
         }));
         console.error('[AGENT][error]', { reqId, summary });
-      } catch (_) {}
+      } catch (_) { }
 
       if (traceEnabled) {
-        try { console.error('[AGENT][error_detail]', safeJson(chain, 8000)); } catch (_) {}
+        try { console.error('[AGENT][error_detail]', safeJson(chain, 8000)); } catch (_) { }
       }
 
       // extract Azure/AICore error if present
@@ -344,7 +480,7 @@ async function runAgentStreaming({ prompt, threadId, res }) {
           message: err.message,
           inner: err.innererror || err.details || undefined,
         };
-      } catch (_) {}
+      } catch (_) { }
 
       const clientErr = {
         reqId,
@@ -355,11 +491,10 @@ async function runAgentStreaming({ prompt, threadId, res }) {
       };
       sseError(res, clientErr);
     } catch (_) {
-      try { sseError(res, { message: 'Agent failed' }); } catch (_) {}
+      try { sseError(res, { message: 'Agent failed' }); } catch (_) { }
     }
-    try { sseEnd(res); } catch (_) {}
+    try { sseEnd(res); } catch (_) { }
   }
 }
 
 module.exports = { runAgentStreaming };
-

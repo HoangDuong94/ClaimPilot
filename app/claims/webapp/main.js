@@ -203,17 +203,18 @@ sap.ui.define([
       return html;
     },
 
+    _generateThreadId: function () {
+      try {
+        const rnd = Math.random().toString(36).slice(2, 10);
+        return 't-' + Date.now().toString(36) + '-' + rnd;
+      } catch (e) {
+        return 't-' + Date.now();
+      }
+    },
+
     initModel: function () {
-      const genThreadId = () => {
-        try {
-          const rnd = Math.random().toString(36).slice(2, 10);
-          return 't-' + Date.now().toString(36) + '-' + rnd;
-        } catch (e) {
-          return 't-' + Date.now();
-        }
-      };
       this.chatModel = new JSONModel({
-        threadId: genThreadId(),
+        threadId: this._generateThreadId(),
         chatHistory: [
           // initial welcome message removed
         ],
@@ -229,6 +230,25 @@ sap.ui.define([
           { text: "Erkläre die Entscheidung" }
         ]
       });
+    },
+
+    resetConversation: function () {
+      try {
+        if (this._currentAbortController) {
+          this._currentAbortController.abort();
+        }
+      } catch (e) { /* ignore */ }
+      this._currentAbortController = null;
+
+      if (!this.chatModel) { return; }
+      this.chatModel.setProperty("/threadId", this._generateThreadId());
+      this.chatModel.setProperty("/chatHistory", []);
+      this.chatModel.setProperty("/userInput", "");
+      this.chatModel.setProperty("/isStreaming", false);
+      this.chatModel.setProperty("/isTyping", false);
+      this.chatModel.setProperty("/statusMessage", "");
+      this.chatModel.setProperty("/showSuggestions", false);
+      this.chatModel.refresh(true);
     },
 
     addMessage: function (type, text) {
@@ -464,6 +484,10 @@ sap.ui.define([
           chatManager._currentAbortController.abort();
         }
       } catch (e) { /* ignore */ }
+    },
+
+    onClearChat: function () {
+      chatManager.resetConversation();
     },
 
     onCopyMessage: function (oEvent) {
