@@ -1,0 +1,382 @@
+{
+  "startedAt": "2025-09-16T15:56:20.248Z",
+  "threadId": "debug-mfmqjhjq-q6now0n8",
+  "runs": [
+    {
+      "startedAt": "2025-09-16T15:56:20.248Z",
+      "durationMs": 9872,
+      "prompt": "Bitte plane zuerst, wie du die neueste Mail aus meinem Posteingang mit dem CLI abrufst.",
+      "analysis": {
+        "accumulated": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so\n\n1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help\n2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query \"[0]\"\n3. Aus der Antwort folgende Felder extrahieren:  subject, from.emailAddress.name, from.emailAddress.address, receivedDateTime, bodyPreview (ggf. auf 120 Zeichen kürzen)\n\n4. Falls bodyPreview nicht enthalten ist, hole ich sie nach mit:m365 outlook message get --id \"<id>\" --output json\nErgebnis: Kurze, vierzeilige Zusammenfassung mit den wichtigsten Infos derneuesten Mail\n",
+        "html": "<p>Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so</p><br/><br/><p>1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help<br/>2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query &quot;[0]&quot;<br/>3. Aus der Antwort folgende Felder extrahieren:  subject, from.emailAddress.name, from.emailAddress.address, receivedDateTime, bodyPreview (ggf. auf 120 Zeichen kürzen)</p><br/><br/><p>4. Falls bodyPreview nicht enthalten ist, hole ich sie nach mit:m365 outlook message get --id &quot;&lt;id&gt;&quot; --output json</p><p>Ergebnis: Kurze, vierzeilige Zusammenfassung mit den wichtigsten Infos derneuesten Mail</p>",
+        "steps": [
+          {
+            "event": "data",
+            "appended": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,",
+            "accumulated": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,",
+            "htmlSample": "<p>Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,</p>"
+          },
+          {
+            "event": "data",
+            "appended": "gehe ich so",
+            "accumulated": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so",
+            "htmlSample": "<p>Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so</p>"
+          },
+          {
+            "event": "data",
+            "appended": "",
+            "accumulated": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so\n",
+            "htmlSample": "<p>Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so</p>"
+          },
+          {
+            "event": "data",
+            "appended": "",
+            "accumulated": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so\n\n",
+            "htmlSample": "<p>Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so</p><br/><br/>"
+          },
+          {
+            "event": "data",
+            "appended": "1. Hilfe anzeigen, falls der passende Befehl unklar ist:  ",
+            "accumulated": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so\n\n1. Hilfe anzeigen, falls der passende Befehl unklar ist:  ",
+            "htmlSample": "<p>Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so</p><br/><br/><p>1. Hilfe anzeigen, falls der passende Befehl unklar ist:</p>"
+          },
+          {
+            "event": "data",
+            "appended": "m365 outlook message list --help",
+            "accumulated": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so\n\n1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help",
+            "htmlSample": "<p>Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so</p><br/><br/><p>1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help</p>"
+          },
+          {
+            "event": "data",
+            "appended": "",
+            "accumulated": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so\n\n1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help\n",
+            "htmlSample": "<p>Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so</p><br/><br/><p>1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help</p>"
+          },
+          {
+            "event": "data",
+            "appended": "2. Die neueste Mail abfragen:",
+            "accumulated": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so\n\n1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help\n2. Die neueste Mail abfragen:",
+            "htmlSample": "<p>Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so</p><br/><br/><p>1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help<br/>2. Die neueste Mail abfragen:</p>"
+          },
+          {
+            "event": "data",
+            "appended": "m365 outlook message list --folderName Inbox --output json --query \"[0]\"",
+            "accumulated": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so\n\n1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help\n2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query \"[0]\"",
+            "htmlSample": "<p>Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so</p><br/><br/><p>1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help<br/>2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query &quot;[0]&quot;</p>"
+          },
+          {
+            "event": "data",
+            "appended": "",
+            "accumulated": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so\n\n1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help\n2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query \"[0]\"\n",
+            "htmlSample": "<p>Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so</p><br/><br/><p>1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help<br/>2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query &quot;[0]&quot;</p>"
+          },
+          {
+            "event": "data",
+            "appended": "3. Aus der Antwort folgende Felder extrahieren:  ",
+            "accumulated": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so\n\n1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help\n2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query \"[0]\"\n3. Aus der Antwort folgende Felder extrahieren:  ",
+            "htmlSample": "<p>Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so</p><br/><br/><p>1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help<br/>2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query &quot;[0]&quot;<br/>3. Aus der Antwort folgende Felder extrahieren:</p>"
+          },
+          {
+            "event": "data",
+            "appended": "subject, from.emailAddress.name, from.emailAddress",
+            "accumulated": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so\n\n1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help\n2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query \"[0]\"\n3. Aus der Antwort folgende Felder extrahieren:  subject, from.emailAddress.name, from.emailAddress",
+            "htmlSample": "<p>Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so</p><br/><br/><p>1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help<br/>2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query &quot;[0]&quot;<br/>3. Aus der Antwort folgende Felder extrahieren:  subject, from.emailAddress.nam"
+          },
+          {
+            "event": "data",
+            "appended": ".address, receivedDateTime, bodyPreview (ggf. auf 120 Zeichen kürzen)",
+            "accumulated": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so\n\n1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help\n2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query \"[0]\"\n3. Aus der Antwort folgende Felder extrahieren:  subject, from.emailAddress.name, from.emailAddress.address, receivedDateTime, bodyPreview (ggf. auf 120 Zeichen kürzen)",
+            "htmlSample": "<p>Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so</p><br/><br/><p>1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help<br/>2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query &quot;[0]&quot;<br/>3. Aus der Antwort folgende Felder extrahieren:  subject, from.emailAddress.nam"
+          },
+          {
+            "event": "data",
+            "appended": "",
+            "accumulated": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so\n\n1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help\n2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query \"[0]\"\n3. Aus der Antwort folgende Felder extrahieren:  subject, from.emailAddress.name, from.emailAddress.address, receivedDateTime, bodyPreview (ggf. auf 120 Zeichen kürzen)\n",
+            "htmlSample": "<p>Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so</p><br/><br/><p>1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help<br/>2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query &quot;[0]&quot;<br/>3. Aus der Antwort folgende Felder extrahieren:  subject, from.emailAddress.nam"
+          },
+          {
+            "event": "data",
+            "appended": "",
+            "accumulated": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so\n\n1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help\n2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query \"[0]\"\n3. Aus der Antwort folgende Felder extrahieren:  subject, from.emailAddress.name, from.emailAddress.address, receivedDateTime, bodyPreview (ggf. auf 120 Zeichen kürzen)\n\n",
+            "htmlSample": "<p>Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so</p><br/><br/><p>1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help<br/>2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query &quot;[0]&quot;<br/>3. Aus der Antwort folgende Felder extrahieren:  subject, from.emailAddress.nam"
+          },
+          {
+            "event": "data",
+            "appended": "4. Falls bodyPreview nicht enthalten ist, hole ich sie nach mit:",
+            "accumulated": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so\n\n1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help\n2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query \"[0]\"\n3. Aus der Antwort folgende Felder extrahieren:  subject, from.emailAddress.name, from.emailAddress.address, receivedDateTime, bodyPreview (ggf. auf 120 Zeichen kürzen)\n\n4. Falls bodyPreview nicht enthalten ist, hole ich sie nach mit:",
+            "htmlSample": "<p>Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so</p><br/><br/><p>1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help<br/>2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query &quot;[0]&quot;<br/>3. Aus der Antwort folgende Felder extrahieren:  subject, from.emailAddress.nam"
+          },
+          {
+            "event": "data",
+            "appended": "m365 outlook message get --id \"<id>\" --output json",
+            "accumulated": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so\n\n1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help\n2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query \"[0]\"\n3. Aus der Antwort folgende Felder extrahieren:  subject, from.emailAddress.name, from.emailAddress.address, receivedDateTime, bodyPreview (ggf. auf 120 Zeichen kürzen)\n\n4. Falls bodyPreview nicht enthalten ist, hole ich sie nach mit:m365 outlook message get --id \"<id>\" --output json",
+            "htmlSample": "<p>Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so</p><br/><br/><p>1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help<br/>2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query &quot;[0]&quot;<br/>3. Aus der Antwort folgende Felder extrahieren:  subject, from.emailAddress.nam"
+          },
+          {
+            "event": "data",
+            "appended": "",
+            "accumulated": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so\n\n1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help\n2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query \"[0]\"\n3. Aus der Antwort folgende Felder extrahieren:  subject, from.emailAddress.name, from.emailAddress.address, receivedDateTime, bodyPreview (ggf. auf 120 Zeichen kürzen)\n\n4. Falls bodyPreview nicht enthalten ist, hole ich sie nach mit:m365 outlook message get --id \"<id>\" --output json\n",
+            "htmlSample": "<p>Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so</p><br/><br/><p>1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help<br/>2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query &quot;[0]&quot;<br/>3. Aus der Antwort folgende Felder extrahieren:  subject, from.emailAddress.nam"
+          },
+          {
+            "event": "data",
+            "appended": "Ergebnis: Kurze, vierzeilige Zusammenfassung mit den wichtigsten Infos der",
+            "accumulated": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so\n\n1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help\n2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query \"[0]\"\n3. Aus der Antwort folgende Felder extrahieren:  subject, from.emailAddress.name, from.emailAddress.address, receivedDateTime, bodyPreview (ggf. auf 120 Zeichen kürzen)\n\n4. Falls bodyPreview nicht enthalten ist, hole ich sie nach mit:m365 outlook message get --id \"<id>\" --output json\nErgebnis: Kurze, vierzeilige Zusammenfassung mit den wichtigsten Infos der",
+            "htmlSample": "<p>Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so</p><br/><br/><p>1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help<br/>2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query &quot;[0]&quot;<br/>3. Aus der Antwort folgende Felder extrahieren:  subject, from.emailAddress.nam"
+          },
+          {
+            "event": "data",
+            "appended": "neuesten Mail",
+            "accumulated": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so\n\n1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help\n2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query \"[0]\"\n3. Aus der Antwort folgende Felder extrahieren:  subject, from.emailAddress.name, from.emailAddress.address, receivedDateTime, bodyPreview (ggf. auf 120 Zeichen kürzen)\n\n4. Falls bodyPreview nicht enthalten ist, hole ich sie nach mit:m365 outlook message get --id \"<id>\" --output json\nErgebnis: Kurze, vierzeilige Zusammenfassung mit den wichtigsten Infos derneuesten Mail",
+            "htmlSample": "<p>Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so</p><br/><br/><p>1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help<br/>2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query &quot;[0]&quot;<br/>3. Aus der Antwort folgende Felder extrahieren:  subject, from.emailAddress.nam"
+          },
+          {
+            "event": "data",
+            "appended": "",
+            "accumulated": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so\n\n1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help\n2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query \"[0]\"\n3. Aus der Antwort folgende Felder extrahieren:  subject, from.emailAddress.name, from.emailAddress.address, receivedDateTime, bodyPreview (ggf. auf 120 Zeichen kürzen)\n\n4. Falls bodyPreview nicht enthalten ist, hole ich sie nach mit:m365 outlook message get --id \"<id>\" --output json\nErgebnis: Kurze, vierzeilige Zusammenfassung mit den wichtigsten Infos derneuesten Mail\n",
+            "htmlSample": "<p>Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,gehe ich so</p><br/><br/><p>1. Hilfe anzeigen, falls der passende Befehl unklar ist:  m365 outlook message list --help<br/>2. Die neueste Mail abfragen:m365 outlook message list --folderName Inbox --output json --query &quot;[0]&quot;<br/>3. Aus der Antwort folgende Felder extrahieren:  subject, from.emailAddress.nam"
+          }
+        ],
+        "traces": [
+          [
+            {
+              "t": 1758038187987,
+              "type": "start",
+              "reqId": "cd3a5452-8724-47ea-8bf5-21028fbb6dc6",
+              "threadId": "debug-mfmqjhjq-q6now0n8",
+              "prompt": "Bitte plane zuerst, wie du die neueste Mail aus meinem Posteingang mit dem CLI abrufst."
+            },
+            {
+              "t": 1758038188009,
+              "type": "llm_start",
+              "preview": "System: Du hilfst bei drei Aufgaben rund um Microsoft 365: Status prüfen, neueste Mail zusammenfassen, Termin erstellen. Sprich Deutsch, formuliere kurz.\n\nStatus: führe \"m365 status --output json\" aus und gib nur connectedAs und cloudType zurück.\n\nNeueste Mail: wenn der Befehl unklar ist, starte mit \"m365 outlook message list --help\". Danach verwende \"m365 outlook message list --folderName Inbox -"
+            },
+            {
+              "t": 1758038190110,
+              "type": "llm_end"
+            }
+          ]
+        ],
+        "errors": []
+      },
+      "events": [
+        {
+          "raw": "data: Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,",
+          "data": "Um die neueste Mail aus deinem Posteingang mit der Microsoft 365 CLI abzurufen,"
+        },
+        {
+          "raw": "data: gehe ich so",
+          "data": "gehe ich so"
+        },
+        {
+          "raw": "data: ",
+          "data": ""
+        },
+        {
+          "raw": "data: ",
+          "data": ""
+        },
+        {
+          "raw": "data: 1. Hilfe anzeigen, falls der passende Befehl unklar ist:  ",
+          "data": "1. Hilfe anzeigen, falls der passende Befehl unklar ist:  "
+        },
+        {
+          "raw": "data:    m365 outlook message list --help",
+          "data": "m365 outlook message list --help"
+        },
+        {
+          "raw": "data: ",
+          "data": ""
+        },
+        {
+          "raw": "data: 2. Die neueste Mail abfragen:",
+          "data": "2. Die neueste Mail abfragen:"
+        },
+        {
+          "raw": "data:    m365 outlook message list --folderName Inbox --output json --query \"[0]\"",
+          "data": "m365 outlook message list --folderName Inbox --output json --query \"[0]\""
+        },
+        {
+          "raw": "data: ",
+          "data": ""
+        },
+        {
+          "raw": "data: 3. Aus der Antwort folgende Felder extrahieren:  ",
+          "data": "3. Aus der Antwort folgende Felder extrahieren:  "
+        },
+        {
+          "raw": "data: subject, from.emailAddress.name, from.emailAddress",
+          "data": "subject, from.emailAddress.name, from.emailAddress"
+        },
+        {
+          "raw": "data: .address, receivedDateTime, bodyPreview (ggf. auf 120 Zeichen kürzen)",
+          "data": ".address, receivedDateTime, bodyPreview (ggf. auf 120 Zeichen kürzen)"
+        },
+        {
+          "raw": "data: ",
+          "data": ""
+        },
+        {
+          "raw": "data: ",
+          "data": ""
+        },
+        {
+          "raw": "data: 4. Falls bodyPreview nicht enthalten ist, hole ich sie nach mit:",
+          "data": "4. Falls bodyPreview nicht enthalten ist, hole ich sie nach mit:"
+        },
+        {
+          "raw": "data:    m365 outlook message get --id \"<id>\" --output json",
+          "data": "m365 outlook message get --id \"<id>\" --output json"
+        },
+        {
+          "raw": "data: ",
+          "data": ""
+        },
+        {
+          "raw": "data: Ergebnis: Kurze, vierzeilige Zusammenfassung mit den wichtigsten Infos der",
+          "data": "Ergebnis: Kurze, vierzeilige Zusammenfassung mit den wichtigsten Infos der"
+        },
+        {
+          "raw": "data: neuesten Mail",
+          "data": "neuesten Mail"
+        },
+        {
+          "raw": "data: ",
+          "data": ""
+        },
+        {
+          "raw": "event: trace\ndata: [{\"t\":1758038187987,\"type\":\"start\",\"reqId\":\"cd3a5452-8724-47ea-8bf5-21028fbb6dc6\",\"threadId\":\"debug-mfmqjhjq-q6now0n8\",\"prompt\":\"Bitte plane zuerst, wie du die neueste Mail aus meinem Posteingang mit dem CLI abrufst.\"},{\"t\":1758038188009,\"type\":\"llm_start\",\"preview\":\"System: Du hilfst bei drei Aufgaben rund um Microsoft 365: Status prüfen, neueste Mail zusammenfassen, Termin erstellen. Sprich Deutsch, formuliere kurz.\\n\\nStatus: führe \\\"m365 status --output json\\\" aus und gib nur connectedAs und cloudType zurück.\\n\\nNeueste Mail: wenn der Befehl unklar ist, starte mit \\\"m365 outlook message list --help\\\". Danach verwende \\\"m365 outlook message list --folderName Inbox -\"},{\"t\":1758038190110,\"type\":\"llm_end\"}]",
+          "event": "trace",
+          "data": "[{\"t\":1758038187987,\"type\":\"start\",\"reqId\":\"cd3a5452-8724-47ea-8bf5-21028fbb6dc6\",\"threadId\":\"debug-mfmqjhjq-q6now0n8\",\"prompt\":\"Bitte plane zuerst, wie du die neueste Mail aus meinem Posteingang mit dem CLI abrufst.\"},{\"t\":1758038188009,\"type\":\"llm_start\",\"preview\":\"System: Du hilfst bei drei Aufgaben rund um Microsoft 365: Status prüfen, neueste Mail zusammenfassen, Termin erstellen. Sprich Deutsch, formuliere kurz.\\n\\nStatus: führe \\\"m365 status --output json\\\" aus und gib nur connectedAs und cloudType zurück.\\n\\nNeueste Mail: wenn der Befehl unklar ist, starte mit \\\"m365 outlook message list --help\\\". Danach verwende \\\"m365 outlook message list --folderName Inbox -\"},{\"t\":1758038190110,\"type\":\"llm_end\"}]"
+        },
+        {
+          "raw": "event: end\ndata: [DONE]",
+          "event": "end",
+          "data": "[DONE]"
+        }
+      ]
+    },
+    {
+      "startedAt": "2025-09-16T15:56:30.331Z",
+      "durationMs": 5211,
+      "prompt": "Ja, bitte führe den Plan jetzt aus.",
+      "analysis": {
+        "accumulated": "Betreff: Begrüssung  Von: Hoang Duong <hoang.duong@pureconsulting.ch>  Datum: 2025-09-16T12:01:37Z  Vorschau: Hallo ! Wie gehts dir ? Viele Grüsse Minh pureconsulting\n",
+        "html": "<p>Betreff: Begrüssung  Von: Hoang Duong &lt;hoang.duong@pureconsulting.ch&gt;  Datum: 2025-09-16T12:01:37Z  Vorschau: Hallo ! Wie gehts dir ? Viele Grüsse Minh pureconsulting</p>",
+        "steps": [
+          {
+            "event": "data",
+            "appended": "Betreff: Begrüssung  ",
+            "accumulated": "Betreff: Begrüssung  ",
+            "htmlSample": "<p>Betreff: Begrüssung  </p>"
+          },
+          {
+            "event": "data",
+            "appended": "Von: Hoang Duong <hoang.duong@pureconsulting.ch>  ",
+            "accumulated": "Betreff: Begrüssung  Von: Hoang Duong <hoang.duong@pureconsulting.ch>  ",
+            "htmlSample": "<p>Betreff: Begrüssung  Von: Hoang Duong &lt;hoang.duong@pureconsulting.ch&gt;  </p>"
+          },
+          {
+            "event": "data",
+            "appended": "Datum: 2025-09-16T12:01:37Z  ",
+            "accumulated": "Betreff: Begrüssung  Von: Hoang Duong <hoang.duong@pureconsulting.ch>  Datum: 2025-09-16T12:01:37Z  ",
+            "htmlSample": "<p>Betreff: Begrüssung  Von: Hoang Duong &lt;hoang.duong@pureconsulting.ch&gt;  Datum: 2025-09-16T12:01:37Z  </p>"
+          },
+          {
+            "event": "data",
+            "appended": "Vorschau: Hallo ! Wie gehts dir ? Viele Grüsse Minh pureconsulting",
+            "accumulated": "Betreff: Begrüssung  Von: Hoang Duong <hoang.duong@pureconsulting.ch>  Datum: 2025-09-16T12:01:37Z  Vorschau: Hallo ! Wie gehts dir ? Viele Grüsse Minh pureconsulting",
+            "htmlSample": "<p>Betreff: Begrüssung  Von: Hoang Duong &lt;hoang.duong@pureconsulting.ch&gt;  Datum: 2025-09-16T12:01:37Z  Vorschau: Hallo ! Wie gehts dir ? Viele Grüsse Minh pureconsulting</p>"
+          },
+          {
+            "event": "data",
+            "appended": "",
+            "accumulated": "Betreff: Begrüssung  Von: Hoang Duong <hoang.duong@pureconsulting.ch>  Datum: 2025-09-16T12:01:37Z  Vorschau: Hallo ! Wie gehts dir ? Viele Grüsse Minh pureconsulting\n",
+            "htmlSample": "<p>Betreff: Begrüssung  Von: Hoang Duong &lt;hoang.duong@pureconsulting.ch&gt;  Datum: 2025-09-16T12:01:37Z  Vorschau: Hallo ! Wie gehts dir ? Viele Grüsse Minh pureconsulting</p>"
+          }
+        ],
+        "traces": [
+          [
+            {
+              "t": 1758038190331,
+              "type": "start",
+              "reqId": "ccb248a9-1331-4003-ba92-2dc6cea245f8",
+              "threadId": "debug-mfmqjhjq-q6now0n8",
+              "prompt": "Ja, bitte führe den Plan jetzt aus."
+            },
+            {
+              "t": 1758038190347,
+              "type": "llm_start",
+              "preview": "System: Du hilfst bei drei Aufgaben rund um Microsoft 365: Status prüfen, neueste Mail zusammenfassen, Termin erstellen. Sprich Deutsch, formuliere kurz.\n\nStatus: führe \"m365 status --output json\" aus und gib nur connectedAs und cloudType zurück.\n\nNeueste Mail: wenn der Befehl unklar ist, starte mit \"m365 outlook message list --help\". Danach verwende \"m365 outlook message list --folderName Inbox -"
+            },
+            {
+              "t": 1758038191094,
+              "type": "llm_end"
+            },
+            {
+              "t": 1758038191099,
+              "type": "tool_start",
+              "tool": {
+                "lc": 1,
+                "type": "not_implemented",
+                "id": [
+                  "langchain",
+                  "tools",
+                  "DynamicStructuredTool"
+                ]
+              },
+              "inputPreview": "{\"command\":\"m365 outlook message list --folderName Inbox --output json --query \\\"[0]\\\"\"}"
+            },
+            {
+              "t": 1758038193903,
+              "type": "tool_end",
+              "outputPreview": "{\"lc\":1,\"type\":\"constructor\",\"id\":[\"langchain_core\",\"messages\",\"ToolMessage\"],\"kwargs\":{\"status\":\"success\",\"content\":\"{\\n  \\\"id\\\": \\\"AAMkADBkOGJhZTg0LTczYjAtNGE0ZS04NGUyLTJiM2U0ZWY0NWY1YgBGAAAAAADVxqbIMt3mQK1HwMXkO797BwDbOK8ywKQXRr5ed_7smunMAAAAAAEMAADbOK8ywKQXRr5ed_7smunMAAARFUtnAAA=\\\",\\n  \\\"createdDateTime\\\": \\\"2025-09-16T12:01:37Z\\\",\\n  \\\"lastModifiedDateTime\\\": \\\"2025-09-16T12:06:39Z\\\",\\n  \\\"c"
+            },
+            {
+              "t": 1758038193907,
+              "type": "llm_start",
+              "preview": "System: Du hilfst bei drei Aufgaben rund um Microsoft 365: Status prüfen, neueste Mail zusammenfassen, Termin erstellen. Sprich Deutsch, formuliere kurz.\n\nStatus: führe \"m365 status --output json\" aus und gib nur connectedAs und cloudType zurück.\n\nNeueste Mail: wenn der Befehl unklar ist, starte mit \"m365 outlook message list --help\". Danach verwende \"m365 outlook message list --folderName Inbox -"
+            },
+            {
+              "t": 1758038195537,
+              "type": "llm_end"
+            }
+          ]
+        ],
+        "errors": []
+      },
+      "events": [
+        {
+          "raw": "data: Betreff: Begrüssung  ",
+          "data": "Betreff: Begrüssung  "
+        },
+        {
+          "raw": "data: Von: Hoang Duong <hoang.duong@pureconsulting.ch>  ",
+          "data": "Von: Hoang Duong <hoang.duong@pureconsulting.ch>  "
+        },
+        {
+          "raw": "data: Datum: 2025-09-16T12:01:37Z  ",
+          "data": "Datum: 2025-09-16T12:01:37Z  "
+        },
+        {
+          "raw": "data: Vorschau: Hallo ! Wie gehts dir ? Viele Grüsse Minh pureconsulting",
+          "data": "Vorschau: Hallo ! Wie gehts dir ? Viele Grüsse Minh pureconsulting"
+        },
+        {
+          "raw": "data: ",
+          "data": ""
+        },
+        {
+          "raw": "event: trace\ndata: [{\"t\":1758038190331,\"type\":\"start\",\"reqId\":\"ccb248a9-1331-4003-ba92-2dc6cea245f8\",\"threadId\":\"debug-mfmqjhjq-q6now0n8\",\"prompt\":\"Ja, bitte führe den Plan jetzt aus.\"},{\"t\":1758038190347,\"type\":\"llm_start\",\"preview\":\"System: Du hilfst bei drei Aufgaben rund um Microsoft 365: Status prüfen, neueste Mail zusammenfassen, Termin erstellen. Sprich Deutsch, formuliere kurz.\\n\\nStatus: führe \\\"m365 status --output json\\\" aus und gib nur connectedAs und cloudType zurück.\\n\\nNeueste Mail: wenn der Befehl unklar ist, starte mit \\\"m365 outlook message list --help\\\". Danach verwende \\\"m365 outlook message list --folderName Inbox -\"},{\"t\":1758038191094,\"type\":\"llm_end\"},{\"t\":1758038191099,\"type\":\"tool_start\",\"tool\":{\"lc\":1,\"type\":\"not_implemented\",\"id\":[\"langchain\",\"tools\",\"DynamicStructuredTool\"]},\"inputPreview\":\"{\\\"command\\\":\\\"m365 outlook message list --folderName Inbox --output json --query \\\\\\\"[0]\\\\\\\"\\\"}\"},{\"t\":1758038193903,\"type\":\"tool_end\",\"outputPreview\":\"{\\\"lc\\\":1,\\\"type\\\":\\\"constructor\\\",\\\"id\\\":[\\\"langchain_core\\\",\\\"messages\\\",\\\"ToolMessage\\\"],\\\"kwargs\\\":{\\\"status\\\":\\\"success\\\",\\\"content\\\":\\\"{\\\\n  \\\\\\\"id\\\\\\\": \\\\\\\"AAMkADBkOGJhZTg0LTczYjAtNGE0ZS04NGUyLTJiM2U0ZWY0NWY1YgBGAAAAAADVxqbIMt3mQK1HwMXkO797BwDbOK8ywKQXRr5ed_7smunMAAAAAAEMAADbOK8ywKQXRr5ed_7smunMAAARFUtnAAA=\\\\\\\",\\\\n  \\\\\\\"createdDateTime\\\\\\\": \\\\\\\"2025-09-16T12:01:37Z\\\\\\\",\\\\n  \\\\\\\"lastModifiedDateTime\\\\\\\": \\\\\\\"2025-09-16T12:06:39Z\\\\\\\",\\\\n  \\\\\\\"c\"},{\"t\":1758038193907,\"type\":\"llm_start\",\"preview\":\"System: Du hilfst bei drei Aufgaben rund um Microsoft 365: Status prüfen, neueste Mail zusammenfassen, Termin erstellen. Sprich Deutsch, formuliere kurz.\\n\\nStatus: führe \\\"m365 status --output json\\\" aus und gib nur connectedAs und cloudType zurück.\\n\\nNeueste Mail: wenn der Befehl unklar ist, starte mit \\\"m365 outlook message list --help\\\". Danach verwende \\\"m365 outlook message list --folderName Inbox -\"},{\"t\":1758038195537,\"type\":\"llm_end\"}]",
+          "event": "trace",
+          "data": "[{\"t\":1758038190331,\"type\":\"start\",\"reqId\":\"ccb248a9-1331-4003-ba92-2dc6cea245f8\",\"threadId\":\"debug-mfmqjhjq-q6now0n8\",\"prompt\":\"Ja, bitte führe den Plan jetzt aus.\"},{\"t\":1758038190347,\"type\":\"llm_start\",\"preview\":\"System: Du hilfst bei drei Aufgaben rund um Microsoft 365: Status prüfen, neueste Mail zusammenfassen, Termin erstellen. Sprich Deutsch, formuliere kurz.\\n\\nStatus: führe \\\"m365 status --output json\\\" aus und gib nur connectedAs und cloudType zurück.\\n\\nNeueste Mail: wenn der Befehl unklar ist, starte mit \\\"m365 outlook message list --help\\\". Danach verwende \\\"m365 outlook message list --folderName Inbox -\"},{\"t\":1758038191094,\"type\":\"llm_end\"},{\"t\":1758038191099,\"type\":\"tool_start\",\"tool\":{\"lc\":1,\"type\":\"not_implemented\",\"id\":[\"langchain\",\"tools\",\"DynamicStructuredTool\"]},\"inputPreview\":\"{\\\"command\\\":\\\"m365 outlook message list --folderName Inbox --output json --query \\\\\\\"[0]\\\\\\\"\\\"}\"},{\"t\":1758038193903,\"type\":\"tool_end\",\"outputPreview\":\"{\\\"lc\\\":1,\\\"type\\\":\\\"constructor\\\",\\\"id\\\":[\\\"langchain_core\\\",\\\"messages\\\",\\\"ToolMessage\\\"],\\\"kwargs\\\":{\\\"status\\\":\\\"success\\\",\\\"content\\\":\\\"{\\\\n  \\\\\\\"id\\\\\\\": \\\\\\\"AAMkADBkOGJhZTg0LTczYjAtNGE0ZS04NGUyLTJiM2U0ZWY0NWY1YgBGAAAAAADVxqbIMt3mQK1HwMXkO797BwDbOK8ywKQXRr5ed_7smunMAAAAAAEMAADbOK8ywKQXRr5ed_7smunMAAARFUtnAAA=\\\\\\\",\\\\n  \\\\\\\"createdDateTime\\\\\\\": \\\\\\\"2025-09-16T12:01:37Z\\\\\\\",\\\\n  \\\\\\\"lastModifiedDateTime\\\\\\\": \\\\\\\"2025-09-16T12:06:39Z\\\\\\\",\\\\n  \\\\\\\"c\"},{\"t\":1758038193907,\"type\":\"llm_start\",\"preview\":\"System: Du hilfst bei drei Aufgaben rund um Microsoft 365: Status prüfen, neueste Mail zusammenfassen, Termin erstellen. Sprich Deutsch, formuliere kurz.\\n\\nStatus: führe \\\"m365 status --output json\\\" aus und gib nur connectedAs und cloudType zurück.\\n\\nNeueste Mail: wenn der Befehl unklar ist, starte mit \\\"m365 outlook message list --help\\\". Danach verwende \\\"m365 outlook message list --folderName Inbox -\"},{\"t\":1758038195537,\"type\":\"llm_end\"}]"
+        },
+        {
+          "raw": "event: end\ndata: [DONE]",
+          "event": "end",
+          "data": "[DONE]"
+        }
+      ]
+    }
+  ]
+}

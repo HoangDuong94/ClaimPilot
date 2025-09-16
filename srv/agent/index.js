@@ -126,6 +126,25 @@ function sseError(res, obj) {
     res.write(`data: ${JSON.stringify(obj)}\n\n`);
   } catch (_) { }
 }
+function sseEvent(res, eventName, payload) {
+  if (!eventName) return;
+  try {
+    res.write(`event: ${eventName}\n`);
+    if (payload !== undefined) {
+      const text = typeof payload === 'string' ? payload : JSON.stringify(payload);
+      for (const line of String(text || '').split(/\r?\n/)) {
+        res.write(`data: ${line}\n`);
+      }
+    } else {
+      res.write('data:\n');
+    }
+    res.write('\n');
+  } catch (_) { }
+}
+function sseTrace(res, trace) {
+  if (!trace || !trace.length) return;
+  sseEvent(res, 'trace', trace);
+}
 
 async function initAgent() {
   if (agentExecutor) return agentExecutor;
@@ -263,51 +282,15 @@ async function runAgentStreaming({ prompt, threadId, res }) {
   const systemMessage = {
     role: 'system',
     content: `
-Rolle & Ziel
-- Du bist ein sehr präziser Assistant mit Zugriff auf MCP-Tools für Microsoft 365.
-- Du erledigst drei Aufgaben effizient: (1) Status prüfen, (2) E-Mails lesen, (3) Kalendereinladungen verschicken.
-- Antworte auf Deutsch und erkläre Tool-Aufrufe in EINEM kurzen Satz.
+Du hilfst bei drei Aufgaben rund um Microsoft 365: Status prüfen, neueste Mail zusammenfassen, Termin erstellen. Sprich Deutsch, formuliere kurz.
 
-Token-Hygiene (sehr wichtig)
-- Nutze KEIN Tool, das globale Kommandolisten oder vollständige Doku ausgibt. Verwende NIEMALS „m365_get_commands“.
-- Verwende „m365_get_command_docs“ nur, wenn ein konkretes Kommando EINMAL fehlgeschlagen ist. Dann:
-  - Hole NUR die Doku zu genau diesem Kommando.
-  - Fasse sie sofort in max. 6 Zeilen / 600 Zeichen zusammen.
-  - Zitiere keinen langen MDX/Code-Block.
-- Gib nie riesige JSONs aus. Extrahiere nur die nötigen Felder und fasse den Rest zusammen.
-- Beende die Aufgabe, sobald das Ziel erreicht ist (keine weiteren ReAct-Runden).
+Status: führe "m365 status --output json" aus und gib nur connectedAs und cloudType zurück.
 
-Erlaubte Werkzeuge
-- m365_run_command (primär)
-- Optional & nur im Fehlerfall: m365_get_command_docs (strikt zusammenfassen, siehe oben)
+Neueste Mail: wenn der Befehl unklar ist, starte mit "m365 outlook message list --help". Danach verwende "m365 outlook message list --folderName Inbox --output json --query \"[0]\"". Aus der Antwort nutzt du subject, from.emailAddress.name, from.emailAddress.address, receivedDateTime und bodyPreview (auf 120 Zeichen kürzen). Falls bodyPreview fehlt, hole sie einmal über "m365 outlook message get --id \"<id>\" --output json". Antworte als vier Zeilen (Betreff, Von, Datum, Vorschau). Roh-JSON nie direkt ausgeben.
 
-Kochrezepte (verwende genau diese Muster)
-1) Status prüfen
-  - Befehl: m365 status --output json
-  - Ausgabe: „Angemeldet als <connectedAs> (Cloud: <cloudType>).“
-  - Falls nicht angemeldet: sage knapp „Bitte zuerst m365 login ausführen.“
+Kalender: "m365 outlook event add" mit passenden Parametern und anschließend kurz bestätigen.
 
-2) Neueste E-Mail aus Inbox
-  - Liste minimal holen:
-    m365 outlook message list --folderName Inbox --top 1 --orderby "receivedDateTime desc" --output json
-  - Falls Body nötig:
-    m365 outlook message get --id "<id>" --output json
-  - Antworte als Markdown-Liste mit genau diesen 4 Zeilen:
-    - Betreff: …
-    - Von: <Name> (<Adresse>)
-    - Datum: <ISO/Locale>
-    - Vorschau: <max 120 Zeichen>
-
-3) Kalender-Einladung erstellen (Beispiel)
-  - Versuche direkt:
-    m365 outlook event add --subject "<Betreff>" --start "<ISO>" --end "<ISO>" --attendees "<mail1,mail2>" --location "<Ort>" --isOnlineMeeting true --output json
-  - Falls Parameterfehler: EINMAL m365_get_command_docs für „m365 outlook event add“ abrufen, kurz zusammenfassen, dann erneut aufrufen.
-  - Antwort: „Termin erstellt: <subject>, <start>–<end>, Teilnehmer: <n>, ID: <id/optional>.“
-
-Antwortstil
-- Max. 1 kurzer Satz vor dem Tool-Call („Ich prüfe den Status …“).
-- Ergebnis kompakt; keine Roh-Doku, keine langen JSONs, keine internen Gedankenschritte.
-- Wenn etwas fehlt (z. B. Zeiten/Teilnehmer): frage nur nach den konkret fehlenden Feldern.
+Vermeide weitere Versuche, sobald das Ziel erreicht ist.
 `.trim()
   };
   const userMessage = { role: 'user', content: String(prompt) };
@@ -363,7 +346,7 @@ Antwortstil
     const stream = await executor.stream(
       { messages: msgs },
       {
-        recursionLimit: Number(process.env.AGENT_RECURSION_LIMIT || 4),
+        recursionLimit: Number(process.env.AGENT_RECURSION_LIMIT || 15),
         configurable: { thread_id: tid },
         callbacks
       }
@@ -445,6 +428,9 @@ Antwortstil
         console.log('[AGENT][response_end]', { chars: sentChars, preview: prev + (sentChars > prev.length ? ' …' : '') });
       }
     } catch (_) { }
+    if (traceEnabled && trace && trace.length) {
+      sseTrace(res, trace);
+    }
     sseEnd(res);
   } catch (e) {
     // Enhanced error logging with deep unwrap and sanitized SSE response
@@ -492,6 +478,9 @@ Antwortstil
       sseError(res, clientErr);
     } catch (_) {
       try { sseError(res, { message: 'Agent failed' }); } catch (_) { }
+    }
+    if (traceEnabled && trace && trace.length) {
+      sseTrace(res, trace);
     }
     try { sseEnd(res); } catch (_) { }
   }

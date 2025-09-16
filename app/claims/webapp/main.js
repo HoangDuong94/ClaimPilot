@@ -438,7 +438,18 @@ sap.ui.define([
 
   const chatController = {
     onSendChatMessageInSidePanel: async function (overrideText) {
-      const text = (overrideText != null ? String(overrideText) : (chatManager.chatModel.getProperty("/userInput") || "")).trim();
+      let providedText = overrideText;
+      if (providedText && typeof providedText === "object") {
+        const isEventLike =
+          (providedText.isA && providedText.isA("sap.ui.base.Event")) ||
+          typeof providedText.getSource === "function" ||
+          typeof providedText.getParameters === "function" ||
+          Object.prototype.hasOwnProperty.call(providedText, "mParameters");
+        if (isEventLike) {
+          providedText = null;
+        }
+      }
+      const text = (providedText != null ? String(providedText) : (chatManager.chatModel.getProperty("/userInput") || "")).trim();
       if (!text) { return; }
       chatManager.chatModel.setProperty("/userInput", "");
       // Escape user text for safe HTML display in FormattedText

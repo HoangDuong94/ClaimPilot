@@ -10,7 +10,8 @@
     "watch:autoport": "cds watch --profile hybrid --port 0",
     "watch-claims": "cds watch --open claims/webapp/index.html?sap-ui-xx-viewCache=false",
     "test:chat": "node scripts/test-chat.js",
-    "test:chat:raw": "node scripts/sse-debug.js"
+    "test:chat:raw": "node scripts/sse-debug.js",
+    "test:formatting": "cds bind --exec -- node scripts\\analyse-agent-stream.js --auto-continue --out tmp\\agent-analysis.json --snapshot tmp\\agent-analysis-snapshot.json"
   },
   "dependencies": {
     "@langchain/langgraph": "^0.4.9",
