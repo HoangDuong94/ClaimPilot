@@ -283,7 +283,7 @@ sap.ui.define([
     },
 
     sendViaStreaming: async function (prompt) {
-      const url = "/ai/agent/stream";
+      const url = "/ai/cli/stream";
       const ac = new AbortController();
       this._currentAbortController = ac;
       this.chatModel.setProperty("/isStreaming", true);
