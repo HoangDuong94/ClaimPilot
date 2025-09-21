@@ -104,16 +104,25 @@ function sseWriteChunked(res, text) {
     let i = 0;
     const n = line.length;
     while (i < n) {
-      let end = Math.min(i + chunkSize, n);
+      const end = Math.min(i + chunkSize, n);
       // try to break at a pleasant boundary within the window
-      let j = line.lastIndexOf('.', end);
-      if (j < i) j = line.lastIndexOf('!', end);
-      if (j < i) j = line.lastIndexOf('?', end);
-      if (j < i) j = line.lastIndexOf(' ', end);
-      if (j < i) j = end;
+      const searchWindowEnd = Math.max(i + 1, end - 1);
+      const idxPeriod = line.lastIndexOf('.', searchWindowEnd);
+      const idxExclaim = line.lastIndexOf('!', searchWindowEnd);
+      const idxQuestion = line.lastIndexOf('?', searchWindowEnd);
+      const idxSpace = line.lastIndexOf(' ', searchWindowEnd);
+      let j = Math.max(idxPeriod, idxExclaim, idxQuestion);
+      if (j < i && idxSpace >= i + Math.floor(chunkSize / 2)) {
+        j = idxSpace;
+      }
+      if (j < i) {
+        j = end;
+      } else {
+        j = Math.min(j + 1, n); // include boundary character
+      }
       const piece = line.slice(i, j).trimStart();
       if (piece) sseWrite(res, piece);
-      i = (j === i ? i + chunkSize : j);
+      i = j;
     }
     // send an explicit newline between long logical lines to help UI paragraphing
     sseWrite(res, '');

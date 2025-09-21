@@ -223,6 +223,9 @@ sap.ui.define([
         isStreaming: false,
         statusMessage: "",
         showSuggestions: false,
+        lastTrace: null,
+        lastStreamText: '',
+        lastStreamHtml: '',
         suggestions: [
           { text: "Fasse den aktuellen Vorgang zusammen" },
           { text: "Welche fehlenden Unterlagen brauche ich?" },
@@ -248,6 +251,9 @@ sap.ui.define([
       this.chatModel.setProperty("/isTyping", false);
       this.chatModel.setProperty("/statusMessage", "");
       this.chatModel.setProperty("/showSuggestions", false);
+      this.chatModel.setProperty("/lastTrace", null);
+      this.chatModel.setProperty("/lastStreamText", '');
+      this.chatModel.setProperty("/lastStreamHtml", '');
       this.chatModel.refresh(true);
     },
 
@@ -287,6 +293,9 @@ sap.ui.define([
       const ac = new AbortController();
       this._currentAbortController = ac;
       this.chatModel.setProperty("/isStreaming", true);
+      this.chatModel.setProperty("/lastTrace", null);
+      this.chatModel.setProperty("/lastStreamText", '');
+      this.chatModel.setProperty("/lastStreamHtml", '');
       const resp = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -379,36 +388,65 @@ sap.ui.define([
           let raw = buf.slice(0, idx);
           buf = buf.slice(idx + 2);
           if (!raw) continue;
-          if (/^data:/m.test(raw)) {
-            // Join all data: lines per SSE spec
-            const lines = raw.split(/\r?\n/);
-            let joined = '';
-            for (const ln of lines) {
-              if (!ln.startsWith('data:')) continue;
+          const lines = raw.split(/\r?\n/);
+          let eventName = null;
+          const dataLines = [];
+          for (const ln of lines) {
+            if (!ln) continue;
+            if (ln.startsWith('event:')) {
+              eventName = ln.slice(6).trim();
+              continue;
+            }
+            if (ln.startsWith('data:')) {
               let d = ln.slice(5);
               if (d.startsWith(' ')) d = d.slice(1);
-              joined += d + '\n';
+              dataLines.push(d);
             }
-            let data = joined.replace(/\n$/, '');
-            if (data.trim() === "[DONE]") { reader.cancel(); break; }
-            // If server sends JSON chunks, try to extract a content field; otherwise append as-is
-            let toAppend = null;
-            if (data.startsWith("{") || data.startsWith("[")) {
-              try {
-                const obj = JSON.parse(data);
-                // Only append visible content fields; ignore tool/event JSON payloads
-                toAppend = obj.delta || obj.content || obj.text || null;
-              } catch (e) {
-                toAppend = null;
-              }
-            }
-            // Interpret empty data events as line breaks (common with SSE token streams)
-            let piece = (toAppend != null ? toAppend : data);
-            // Apply streaming bullet normalization heuristics
-            piece = normalizeBulletsStreaming(accumulated, piece);
-            accumulated += (piece === "" ? "\n" : piece);
-            scheduleRender();
           }
+          if (!dataLines.length) continue;
+          let data = dataLines.join('\n');
+          // SSE spec: append newline after each data line; remove final trailing newline to keep behaviour
+          if (data.endsWith('\n')) data = data.slice(0, -1);
+
+          if (eventName === 'trace') {
+            try {
+              const tracePayload = JSON.parse(data);
+              this.chatModel.setProperty('/lastTrace', tracePayload);
+              this.chatModel.refresh(true);
+            } catch (e) { /* ignore malformed trace */ }
+            continue;
+          }
+
+          if (eventName === 'error') {
+            try {
+              const err = JSON.parse(data);
+              reader.cancel();
+              throw new Error(err && err.message ? err.message : 'Agent error');
+            } catch (e) {
+              reader.cancel();
+              throw new Error(typeof data === 'string' && data ? data : 'Agent error');
+            }
+          }
+
+          if (eventName === 'end' || data.trim() === "[DONE]") { reader.cancel(); break; }
+
+          // If server sends JSON chunks, try to extract a content field; otherwise append as-is
+          let toAppend = null;
+          if (data.startsWith("{") || data.startsWith("[")) {
+            try {
+              const obj = JSON.parse(data);
+              // Only append visible content fields; ignore tool/event JSON payloads
+              toAppend = obj.delta || obj.content || obj.text || null;
+            } catch (e) {
+              toAppend = null;
+            }
+          }
+          // Interpret empty data events as line breaks (common with SSE token streams)
+          let piece = (toAppend != null ? toAppend : data);
+          // Apply streaming bullet normalization heuristics
+          piece = normalizeBulletsStreaming(accumulated, piece);
+          accumulated += (piece === "" ? "\n" : piece);
+          scheduleRender();
         }
       }
         // finalize full render once stream completes
@@ -427,6 +465,8 @@ sap.ui.define([
           ? this.renderMarkdownToHtml(tail, { autoParagraphMode: 'never' })
           : this.renderMarkdownToHtml(tail, { autoParagraphMode: 'fallback' });
         const finalHtml = renderedPrefixHtml + tailHtml;
+        this.chatModel.setProperty('/lastStreamText', accumulated);
+        this.chatModel.setProperty('/lastStreamHtml', finalHtml);
         return { html: finalHtml, text: accumulated };
       } finally {
         this.chatModel.setProperty("/isStreaming", false);
@@ -473,8 +513,8 @@ sap.ui.define([
         // replace last thinking message
         const history = chatManager.chatModel.getProperty("/chatHistory");
         history.pop();
-        const finalHtml = (usedStreaming && resp && resp.html)
-          ? resp.html
+        const finalHtml = (usedStreaming && resp && typeof resp.text === 'string')
+          ? chatManager.renderMarkdownToHtml(resp.text)
           : ((typeof resp === 'string' && /\s*</.test(resp)) ? resp : chatManager.renderMarkdownToHtml(resp));
         // We just removed an assistant placeholder, so this is not a new group
         history.push({ type: "assistant", text: finalHtml, groupStart: false });
