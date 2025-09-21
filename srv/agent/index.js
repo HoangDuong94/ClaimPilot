@@ -3,6 +3,7 @@
 
 // Lightweight helpers for safe logging and output shaping
 const crypto = require('crypto');
+const { createChatProvider } = require('../chat-provider');
 function hash(s = '') {
   try { return crypto.createHash('sha1').update(String(s)).digest('hex').slice(0, 10); } catch (_) { return 'nohash'; }
 }
@@ -73,7 +74,7 @@ function reduceOutput(cmd, raw) {
 
 let agentExecutor = null;
 let mcpClients = null;
-let agentInfo = { toolNames: [], modelName: '' };
+let agentInfo = { toolNames: [], modelName: '', provider: '' };
 const { unwrapError, safeJson } = require('./helpers/logging');
 const { enableHttpTrace } = require('./bootstrap/http-trace');
 
@@ -155,7 +156,6 @@ async function initAgent() {
   const { initAllMCPClients } = require('./mcp-clients');
   const { createReactAgent } = await import('@langchain/langgraph/prebuilt');
   const { MemorySaver } = await import('@langchain/langgraph-checkpoint');
-  const { AzureOpenAiChatClient } = await import('@sap-ai-sdk/langchain');
   const { DynamicStructuredTool } = await import('@langchain/core/tools');
   const { z } = await import('zod');
 
@@ -187,20 +187,27 @@ async function initAgent() {
   }
 
   // 3) LLM + in-memory checkpointing
-  const llm = new AzureOpenAiChatClient(
-    {
-      modelName: process.env.AI_MODEL_NAME || 'gpt-4.1',
-      temperature: Number(process.env.AI_TEMPERATURE || 1),
-      maxCompletionTokens: Number(500),
-    },
-    { destinationName: process.env.AI_DESTINATION_NAME || 'aicore-destination' }
-  );
+  const parsedTemp = Number(process.env.AI_TEMPERATURE);
+  const temperature = Number.isFinite(parsedTemp) ? parsedTemp : 1;
+  const parsedMaxTokens = Number(process.env.AGENT_MAX_COMPLETION_TOKENS ?? 500);
+  const maxCompletionTokens = Number.isFinite(parsedMaxTokens) ? parsedMaxTokens : 500;
+
+  const llmProvider = await createChatProvider({
+    temperature,
+    maxCompletionTokens,
+  });
+
+  const llm = llmProvider.langchain;
+  if (!llm || typeof llm.invoke !== 'function') {
+    throw new Error('Chat provider did not supply a LangChain-compatible chat model');
+  }
   const checkpointer = new MemorySaver();
 
   // Log effective LLM config + optional diag ping
   try {
     const kw = (llm && llm.lc_serializable && llm.lc_serializable.kwargs) || {};
     console.log('[AGENT][llm_config]', {
+      provider: llmProvider?.provider,
       model: kw.model || kw.modelName,
       temperature: kw.temperature,
       maxTokens: kw.maxTokens,
@@ -238,9 +245,14 @@ async function initAgent() {
   // capture agent info for diagnostics
   try {
     agentInfo.toolNames = (allTools || []).map(t => t?.name || 'unknown');
-    agentInfo.modelName = llm?.lc_serializable?.kwargs?.model || process.env.AI_MODEL_NAME || 'gpt-4.1';
+    agentInfo.modelName = llmProvider?.modelName
+      || llm?.lc_serializable?.kwargs?.model
+      || process.env.AI_MODEL_NAME
+      || 'gpt-4.1';
+    agentInfo.provider = llmProvider?.provider || String(process.env.AI_PROVIDER || 'azure');
     console.log('[AGENT][init]', {
       model: agentInfo.modelName,
+      provider: agentInfo.provider,
       tools: agentInfo.toolNames,
       m365Enabled: !!mcpClients.m365,
     });
@@ -273,10 +285,19 @@ async function runAgentStreaming({ prompt, threadId, res }) {
       reqId,
       threadId: String(threadId || 'default'),
       model: agentInfo.modelName || (process.env.AI_MODEL_NAME || 'gpt-4.1'),
+      provider: agentInfo.provider || String(process.env.AI_PROVIDER || 'azure'),
       tools: agentInfo.toolNames,
       promptPreview: String(prompt).slice(0, 200)
     });
-    if (traceEnabled) trace.push({ t: Date.now(), type: 'start', reqId, threadId: String(threadId || 'default'), prompt: String(prompt) });
+    if (traceEnabled) trace.push({
+      t: Date.now(),
+      type: 'start',
+      reqId,
+      threadId: String(threadId || 'default'),
+      prompt: String(prompt),
+      provider: agentInfo.provider,
+      model: agentInfo.modelName,
+    });
   } catch (_) { }
 
   const systemMessage = {
@@ -453,15 +474,15 @@ Vermeide weitere Versuche, sobald das Ziel erreicht ist.
         try { console.error('[AGENT][error_detail]', safeJson(chain, 8000)); } catch (_) { }
       }
 
-      // extract Azure/AICore error if present
+      // extract provider-specific error if present
       const primary = chain.find(c => c.responseData) || chain[0] || {};
-      let azureError;
+      let providerError;
       try {
         const d = typeof primary.responseData === 'string'
           ? JSON.parse(primary.responseData)
           : primary.responseData;
         const err = (d && d.error) || d || {};
-        azureError = {
+        providerError = {
           code: err.code,
           message: err.message,
           inner: err.innererror || err.details || undefined,
@@ -471,9 +492,10 @@ Vermeide weitere Versuche, sobald das Ziel erreicht ist.
       const clientErr = {
         reqId,
         status: primary.responseStatus || primary.code || 500,
-        code: (azureError && azureError.code) || (chain[0] && chain[0].code) || 'ERR',
-        message: (azureError && azureError.message) || (chain[0] && chain[0].message) || 'Agent failed',
-        inner: azureError && azureError.inner,
+        code: (providerError && providerError.code) || (chain[0] && chain[0].code) || 'ERR',
+        message: (providerError && providerError.message) || (chain[0] && chain[0].message) || 'Agent failed',
+        inner: providerError && providerError.inner,
+        provider: agentInfo.provider,
       };
       sseError(res, clientErr);
     } catch (_) {

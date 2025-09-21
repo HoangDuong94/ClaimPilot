@@ -14,18 +14,20 @@
     "test:formatting": "cds bind --exec -- node scripts\\analyse-agent-stream.js --auto-continue --out tmp\\agent-analysis.json --snapshot tmp\\agent-analysis-snapshot.json"
   },
   "dependencies": {
+    "@langchain/core": "^0.3.75",
     "@langchain/langgraph": "^0.4.9",
     "@langchain/langgraph-checkpoint": "^0.1.1",
     "@langchain/mcp-adapters": "^0.6.0",
-    "@langchain/core": "^0.3.75",
-    "@sap-ai-sdk/langchain": "^1.14.0",
+    "@langchain/openai": "^0.3.17",
     "@modelcontextprotocol/sdk": "^1.17.5",
+    "@sap-ai-sdk/langchain": "^1.14.0",
     "@sap-cloud-sdk/connectivity": "^3",
     "@sap-cloud-sdk/http-client": "^3",
     "@sap-cloud-sdk/resilience": "^3",
     "@sap/cds": "^8.9.4",
     "dotenv": "^16.6.1",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "openai": "^4.104.0"
   },
   "devDependencies": {
     "@sap/cds-dk": "^8.9.4",

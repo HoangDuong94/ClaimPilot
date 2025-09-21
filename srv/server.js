@@ -1,4 +1,5 @@
 const cds = require('@sap/cds');
+const { createChatProvider } = require('./chat-provider');
 
 async function streamGenAI(prompt, res, opts = {}) {
   function sseWrite(res, data) {
@@ -10,37 +11,16 @@ async function streamGenAI(prompt, res, opts = {}) {
     }
     res.write(`\n`);
   }
-  const { AzureOpenAiChatClient } = await import('@sap-ai-sdk/langchain');
-  const destinationName = process.env.AI_DESTINATION_NAME || 'aicore-destination';
-  const modelName = process.env.AI_MODEL_NAME || 'gpt-4.1';
-
-  const client = new AzureOpenAiChatClient({ modelName, temperature: 0.3 }, { destinationName });
-
+  const client = await createChatProvider();
+  const messages = [{ role: 'user', content: String(prompt || '') }];
   const forceFallback = !!opts.forceFallback;
   try {
     if (forceFallback) throw new Error('forced-fallback');
-    const stream = await client.stream([
-      { role: 'user', content: String(prompt || '') }
-    ]);
-
-    for await (const chunk of stream) {
-      const piece = typeof chunk.content === 'string'
-        ? chunk.content
-        : Array.isArray(chunk.content)
-          ? chunk.content.map(p => (typeof p === 'string' ? p : p?.text || '')).join('')
-          : '';
+    for await (const piece of client.stream(messages)) {
       if (piece) sseWrite(res, piece);
     }
   } catch (e) {
-    const result = await client.invoke([
-      { role: 'user', content: String(prompt || '') }
-    ]);
-    const content = typeof result.content === 'string'
-      ? result.content
-      : Array.isArray(result.content)
-        ? result.content.map(p => (typeof p === 'string' ? p : p?.text || '')).join('')
-        : '';
-    const text = String(content || '');
+    const text = String(await client.complete(messages) || '');
     const chunkSize = 64;
     for (let i = 0; i < text.length; i += chunkSize) {
       const piece = text.slice(i, i + chunkSize);
