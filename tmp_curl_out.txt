@@ -1,9 +1,0 @@
-HTTP/1.1 200 OK
-X-Powered-By: Express
-Content-Type: text/event-stream; charset=utf-8
-Cache-Control: no-cache, no-transform
-Connection: keep-alive
-X-Accel-Buffering: no
-Date: Tue, 09 Sep 2025 11:46:36 GMT
-Transfer-Encoding: chunked
-

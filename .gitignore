@@ -11,6 +11,11 @@ db.sqlite
 # Env
 .env
 .env.local
+*.tmp
+.server_pid
+server.err
+tmp/
+tmp_*
 
 # OS/Editor
 .DS_Store
