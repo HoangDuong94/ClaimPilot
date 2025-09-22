@@ -9,11 +9,14 @@
     "watch:hybrid": "cds watch --profile hybrid --port ",
     "watch:autoport": "cds watch --profile hybrid --port 0",
     "watch-claims": "cds watch --open claims/webapp/index.html?sap-ui-xx-viewCache=false",
+    "deploy:pg": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy-postgres.ps1",
+    "deploy:pg:verify": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy-postgres.ps1 -Verify -UseDocker",
     "test:chat": "node scripts/test-chat.js",
     "test:chat:raw": "node scripts/sse-debug.js",
     "test:formatting": "cds bind --exec -- node scripts\\analyse-agent-stream.js --auto-continue --out tmp\\agent-analysis.json --snapshot tmp\\agent-analysis-snapshot.json"
   },
   "dependencies": {
+    "@cap-js/postgres": "^2.0.5",
     "@langchain/core": "^0.3.75",
     "@langchain/langgraph": "^0.4.9",
     "@langchain/langgraph-checkpoint": "^0.1.1",
@@ -24,13 +27,14 @@
     "@sap-cloud-sdk/connectivity": "^3",
     "@sap-cloud-sdk/http-client": "^3",
     "@sap-cloud-sdk/resilience": "^3",
-    "@sap/cds": "^8.9.4",
+    "@sap/cds": "^9.3.1",
     "dotenv": "^16.6.1",
     "express": "^4.19.2",
     "openai": "^4.104.0"
   },
   "devDependencies": {
-    "@sap/cds-dk": "^8.9.4",
+    "@cap-js/sqlite": "^1.11.1",
+    "@sap/cds-dk": "^9.3.2",
     "sqlite3": "^5.1.7"
   },
   "cds": {
@@ -42,10 +46,44 @@
     },
     "requires": {
       "db": {
-        "kind": "sqlite",
+        "kind": "postgres",
+        "impl": "@cap-js/postgres",
         "credentials": {
-          "database": "sqlite.db"
+          "host": "{env.POSTGRES_HOST}",
+          "port": "{env.POSTGRES_PORT}",
+          "database": "{env.POSTGRES_DATABASE}",
+          "user": "{env.POSTGRES_USER}",
+          "password": "{env.POSTGRES_PASSWORD}",
+          "schema": "public"
+        },
+        "pool": {
+          "acquireTimeoutMillis": 10000,
+          "destroyTimeoutMillis": 2000,
+          "min": 0,
+          "max": 10
+        },
+        "client": {
+          "connectionTimeoutMillis": 10000,
+          "connectionString": "{env.DATABASE_URL}"
         }
+      }
+    },
+    "sql": {
+      "dialect": "postgres"
+    },
+    "[hybrid]": {
+      "requires": {
+        "db": {
+          "kind": "postgres",
+          "impl": "@cap-js/postgres",
+          "credentials": {
+            "url": "{env.DATABASE_URL}",
+            "schema": "public"
+          }
+        }
+      },
+      "sql": {
+        "dialect": "postgres"
       }
     },
     "server": {
@@ -54,5 +92,8 @@
   },
   "sapux": [
     "app/claims"
-  ]
+  ],
+  "volta": {
+    "node": "22.19.0"
+  }
 }
