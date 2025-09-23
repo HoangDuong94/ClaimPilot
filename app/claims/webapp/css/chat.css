@@ -35,3 +35,15 @@ body { padding-right: 440px; }
 .cpMentionPopover .sapMList .sapMLIB { padding: 0.6rem 0.85rem; align-items: flex-start; }
 .cpMentionPopover .cpMentionItem { gap: 0.25rem; }
 .cpMentionPopover .cpMentionItemText { white-space: normal; display: block; font-size: 0.95rem; line-height: 1.35; }
+.cp-bubble-loading { position: relative; background: #ffffff; }
+.cp-bubble-loader { gap: 0.6rem; }
+.cp-loader-label { font-size: 0.9rem; color: #4b5563; }
+.cp-loader-dots { display: inline-flex; gap: 0.35rem; align-items: center; margin-left: 0.25rem; }
+.cp-loader-dot { font-size: 1.5rem; line-height: 1; color: #6366f1; opacity: 0.3; animation: cp-bubble-dot 1.2s infinite ease-in-out; }
+.cp-loader-dot-2 { animation-delay: 0.15s; }
+.cp-loader-dot-3 { animation-delay: 0.3s; }
+
+@keyframes cp-bubble-dot {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
+  40% { transform: translateY(-2px); opacity: 0.9; }
+}

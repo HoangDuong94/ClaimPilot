@@ -263,11 +263,19 @@ sap.ui.define([
       this.chatModel.refresh(true);
     },
 
-    addMessage: function (type, text) {
+    addMessage: function (type, text, opts) {
+      const options = opts || {};
       const history = this.chatModel.getProperty("/chatHistory");
       const prev = history[history.length - 1];
-      const groupStart = !prev || prev.type !== type;
-      history.push({ type, text, groupStart });
+      const groupStart = options.groupStart !== undefined
+        ? !!options.groupStart
+        : (!prev || prev.type !== type || !!prev.loading);
+      history.push({
+        type,
+        text,
+        groupStart,
+        loading: !!options.loading
+      });
       this.chatModel.setProperty("/chatHistory", history);
       this.chatModel.refresh(true);
       setTimeout(function () {
@@ -356,15 +364,22 @@ sap.ui.define([
       // ensure last assistant placeholder exists
       const history = this.chatModel.getProperty("/chatHistory");
       if (!history.length || history[history.length - 1].type !== "assistant") {
-        this.addMessage("assistant", "<i>Thinking...</i>");
+        this.addMessage("assistant", "", { loading: true });
       }
 
       const updateAssistant = (html) => {
         if (html == null || String(html).trim() === "") return;
         const h = this.chatModel.getProperty("/chatHistory");
-        h[h.length - 1] = { type: "assistant", text: html };
-        this.chatModel.setProperty("/chatHistory", h);
-        this.chatModel.refresh(true);
+        const lastIdx = h.length - 1;
+        if (lastIdx >= 0) {
+          const entry = h[lastIdx];
+          entry.type = "assistant";
+          entry.text = html;
+          entry.loading = false;
+          h[lastIdx] = entry;
+          this.chatModel.setProperty("/chatHistory", h);
+          this.chatModel.refresh(true);
+        }
       };
 
       // Heuristic: insert missing newlines before bullet/number markers while streaming
@@ -477,6 +492,20 @@ sap.ui.define([
       } finally {
         this.chatModel.setProperty("/isStreaming", false);
         this.chatModel.setProperty("/showSuggestions", false);
+        try {
+          const h = this.chatModel.getProperty("/chatHistory");
+          if (Array.isArray(h) && h.length) {
+            const lastEntry = h[h.length - 1];
+            if (lastEntry && lastEntry.loading) {
+              lastEntry.loading = false;
+              if (!lastEntry.text) {
+                lastEntry.text = "<i>Keine Antwort erhalten.</i>";
+              }
+              this.chatModel.setProperty("/chatHistory", h);
+              this.chatModel.refresh(true);
+            }
+          }
+        } catch (noop) { /* ignore */ }
         this._currentAbortController = null;
       }
     }
@@ -508,7 +537,7 @@ sap.ui.define([
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;");
       chatManager.addMessage("user", escapeHtml(text));
-      chatManager.addMessage("assistant", "<i>Thinking...</i>");
+      chatManager.addMessage("assistant", "", { loading: true });
       chatManager.chatModel.setProperty("/showSuggestions", false);
       try {
         let resp; let usedStreaming = false;
@@ -525,13 +554,13 @@ sap.ui.define([
           ? chatManager.renderMarkdownToHtml(resp.text)
           : ((typeof resp === 'string' && /\s*</.test(resp)) ? resp : chatManager.renderMarkdownToHtml(resp));
         // We just removed an assistant placeholder, so this is not a new group
-        history.push({ type: "assistant", text: finalHtml, groupStart: false });
+        history.push({ type: "assistant", text: finalHtml, groupStart: false, loading: false });
         chatManager.chatModel.setProperty("/chatHistory", history);
         chatManager.chatModel.refresh(true);
       } catch (e) {
         const history = chatManager.chatModel.getProperty("/chatHistory");
         history.pop();
-        history.push({ type: "assistant", text: "<b>Fehler:</b> " + (e && e.message || e), groupStart: false });
+        history.push({ type: "assistant", text: "<b>Fehler:</b> " + (e && e.message || e), groupStart: false, loading: false });
         chatManager.chatModel.setProperty("/chatHistory", history);
         chatManager.chatModel.refresh(true);
       }

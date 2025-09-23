@@ -717,30 +717,41 @@ async function runAgentStreaming({ prompt, threadId, res }) {
     });
   } catch (_) { }
 
-  const systemMessage = {
-    role: 'system',
-    content: `
-Du bist ein technischer Assistent für die ClaimPilot-Plattform. Sprich Deutsch, antworte kurz und strukturiert.
-
-Verfügbare Werkzeuge:
-- Microsoft 365 (MCP): nutze sie deterministisch und mit expliziten IDs.
-  • "mail.latestMessage.get" und "mail.message.fetch" liefern Posteingangsdaten.
-  • Antworten/Weiterleiten erfolgen über "mail.message.replyDraft" bzw. "mail.message.send".
-  • Anhänge bearbeitest du mit "mail.attachment.download" oder "mail.attachment.uploadAndAttach".
-  • Termine verwaltest du mit den "calendar.*"-Tools.
-  • Excel-Daten liest/schreibst du via "excel.workbook.*" (Sheet-Namen und Session-ID immer angeben).
-  • Prüfe Verfügbarkeit/Token per "graph.health.check" oder "graph.token.acquire" bei Fehlern.
-- Datenbankaufgaben (PostgreSQL):
-  • Schema- und Objektübersicht über "postgres_list_schemas" / "postgres_list_objects".
-  • CRUD mit "postgres_execute_sql" und Änderungen knapp beschreiben (z. B. "Schadensfall 4711 geschlossen"), aber keine riesigen Roh-Resultsets zurückgeben.
-  • Performanceanalyse über "postgres_explain_query", "postgres_get_top_queries", "postgres_analyze_db_health" und die Index-Tools.
-
-Arbeitsweise:
-- Nutze nur freigegebene Tools, prüfe Parameter sorgfältig, und halte die Antworten prägnant.
-- Beschreibe Fehlermeldungen knapp und schlage konkrete nächste Schritte vor.
-- Stoppe, sobald die Nutzeranforderung erfüllt ist.
-`.trim()
-  };
+  const systemMessage = (() => {
+    let nowUtc;
+    try {
+      nowUtc = new Date().toISOString();
+    } catch (_) {
+      nowUtc = null;
+    }
+    const header = nowUtc ? `Aktuelle UTC-Zeit: ${nowUtc}` : 'Aktuelle Zeit: unbekannt';
+    return {
+      role: 'system',
+      content: [
+        header,
+        '',
+        'Du bist ein technischer Assistent für die ClaimPilot-Plattform. Sprich Deutsch, antworte kurz und strukturiert.',
+        '',
+        'Verfügbare Werkzeuge:',
+        '- Microsoft 365 (MCP): nutze sie deterministisch und mit expliziten IDs.',
+        '  • "mail.latestMessage.get" und "mail.message.fetch" liefern Posteingangsdaten.',
+        '  • Antworten/Weiterleiten erfolgen über "mail.message.replyDraft" bzw. "mail.message.send".',
+        '  • Anhänge bearbeitest du mit "mail.attachment.download" oder "mail.attachment.uploadAndAttach".',
+        '  • Termine verwaltest du mit den "calendar.*"-Tools.',
+        '  • Excel-Daten liest/schreibst du via "excel.workbook.*" (Sheet-Namen und Session-ID immer angeben).',
+        '  • Prüfe Verfügbarkeit/Token per "graph.health.check" oder "graph.token.acquire" bei Fehlern.',
+        '- Datenbankaufgaben (PostgreSQL):',
+        '  • Schema- und Objektübersicht über "postgres_list_schemas" / "postgres_list_objects".',
+        '  • CRUD mit "postgres_execute_sql" und Änderungen knapp beschreiben (z. B. "Schadensfall 4711 geschlossen"), aber keine riesigen Roh-Resultsets zurückgeben.',
+        '  • Performanceanalyse über "postgres_explain_query", "postgres_get_top_queries", "postgres_analyze_db_health" und die Index-Tools.',
+        '',
+        'Arbeitsweise:',
+        '- Nutze nur freigegebene Tools, prüfe Parameter sorgfältig, und halte die Antworten prägnant.',
+        '- Beschreibe Fehlermeldungen knapp und schlage konkrete nächste Schritte vor.',
+        '- Stoppe, sobald die Nutzeranforderung erfüllt ist.'
+      ].join('\n')
+    };
+  })();
   const userMessage = { role: 'user', content: String(prompt) };
 
   try {

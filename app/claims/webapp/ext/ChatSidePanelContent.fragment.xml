@@ -47,8 +47,16 @@
                                 <FormattedText htmlText="{chat>text}"/>
                             </VBox>
                             <!-- Assistant bubble (fixed classes) -->
-                            <VBox class="cp-bubble cp-assistant" renderType="Bare" visible="{= ${chat>type} !== 'user' }">
-                                <FormattedText htmlText="{chat>text}"/>
+                            <VBox class="{= ${chat>loading} ? 'cp-bubble cp-assistant cp-bubble-loading' : 'cp-bubble cp-assistant'}" renderType="Bare" visible="{= ${chat>type} !== 'user' }">
+                                <HBox class="cp-bubble-loader" visible="{chat>loading}" alignItems="Center" justifyContent="Start">
+                                    <Text text="PureAI denkt ..." class="cp-loader-label"/>
+                                    <HBox class="cp-loader-dots" alignItems="Center" justifyContent="Start">
+                                        <Text text="•" class="cp-loader-dot cp-loader-dot-1"/>
+                                        <Text text="•" class="cp-loader-dot cp-loader-dot-2"/>
+                                        <Text text="•" class="cp-loader-dot cp-loader-dot-3"/>
+                                    </HBox>
+                                </HBox>
+                                <FormattedText htmlText="{chat>text}" visible="{= !${chat>loading}}"/>
                             </VBox>
                             <Button
                                 icon="sap-icon://copy"
