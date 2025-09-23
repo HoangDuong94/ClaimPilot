@@ -1,7 +1,9 @@
-// Minimal MCP client bootstrap: only M365 (stdio) for now
+// Minimal MCP client bootstrap: in-process M365 handlers plus optional external clients
 // CommonJS file using dynamic ESM imports where needed
 
 const process = require('process');
+const { spawnSync } = require('child_process');
+const { createM365InProcessClient } = require('./mcp-m365-inprocess');
 
 function expandEnvVars(str, env = process.env) {
   if (!str || typeof str !== 'string') return str;
@@ -76,49 +78,76 @@ function ensureUnrestrictedArgs(args = []) {
   return next;
 }
 
-async function initAllMCPClients() {
+async function initAllMCPClients(options = {}) {
   const clients = {};
+  const disableDefaults = options.disableDefaults === true;
 
-  // M365 MCP ist vorübergehend deaktiviert.
-  // if (process.env.MCP_M365_CMD) {
-  //   try {
-  //     const { command, args } = parseCommandLine(process.env.MCP_M365_CMD);
-  //     if (!command) throw new Error('MCP_M365_CMD ist leer/ungültig');
-  //     const { client } = await startMcpClient('m365', command, args, {});
-  //     clients.m365 = client;
-  //   } catch (e) {
-  //     console.warn('[MCP] M365 start/connect failed:', e && e.message ? e.message : String(e));
-  //   }
-  // }
-
-  const pgCmd = expandEnvVars(process.env.MCP_POSTGRES_CMD);
-  if (pgCmd) {
+  const shouldAutoEnableM365 = () => {
+    if (options?.m365?.enable !== undefined) return options.m365.enable;
+    const flag = process.env.MCP_M365_ENABLE_INPROCESS;
+    if (flag && ['1', 'true', 'yes', 'on'].includes(String(flag).toLowerCase())) return true;
+    if (process.env.MCP_M365_ACCESS_TOKEN || process.env.GRAPH_ACCESS_TOKEN) return true;
+    if (process.env.MCP_M365_CLIENT_ID && process.env.MCP_M365_CLIENT_SECRET && process.env.MCP_M365_TENANT_ID) return true;
+    const cliCommand = options?.m365?.cli?.command
+      || process.env.MCP_M365_CLI_BIN
+      || process.env.M365_CLI_BIN
+      || 'm365';
     try {
-      const { command, args } = parseCommandLine(pgCmd);
-      if (!command) throw new Error('MCP_POSTGRES_CMD ist leer/ungültig');
-      const unrestrictedArgs = ensureUnrestrictedArgs(args);
-      const pgEnv = {};
-      const uri = process.env.MCP_POSTGRES_URI
-        || process.env.MCP_POSTGRES_DATABASE_URI
-        || process.env.MCP_POSTGRES_URL
-        || process.env.DATABASE_URL
-        || process.env.POSTGRES_URL;
-      if (uri) {
-        pgEnv.DATABASE_URI = uri;
-      } else {
-        console.warn('[MCP] Postgres DATABASE_URI nicht gesetzt (setze MCP_POSTGRES_URI oder DATABASE_URL)');
-      }
-      const { client } = await startMcpClient('postgres', command, unrestrictedArgs, pgEnv);
-      try {
-        console.log('[MCP] Postgres client verbunden', {
-          command,
-          args: unrestrictedArgs,
-          uri: maskUri(uri || pgEnv.DATABASE_URI),
-        });
-      } catch (_) { }
-      clients.postgres = client;
+      const result = spawnSync(cliCommand, ['--version'], { stdio: 'ignore' });
+      if (result && result.status === 0) return true;
+    } catch (_) { /* CLI not available */ }
+    return false;
+  };
+
+  if (options?.m365?.dependencies) {
+    try {
+      clients.m365 = createM365InProcessClient({ dependencies: options.m365.dependencies });
     } catch (e) {
-      console.warn('[MCP] Postgres start/connect failed:', e && e.message ? e.message : String(e));
+      console.warn('[MCP] Failed to initialise in-process M365 client:', e && e.message ? e.message : String(e));
+    }
+  } else if (!disableDefaults && shouldAutoEnableM365()) {
+    try {
+      const { createDefaultM365Dependencies } = require('./mcp-m365-defaults');
+      const dependencies = await createDefaultM365Dependencies(options?.m365?.config || {});
+      clients.m365 = createM365InProcessClient({ dependencies });
+      try {
+        console.log('[MCP] In-process M365 client aktiviert');
+      } catch (_) {}
+    } catch (e) {
+      console.warn('[MCP] In-process M365 initialisation failed:', e && e.message ? e.message : String(e));
+    }
+  }
+
+  if (!disableDefaults) {
+    const pgCmd = expandEnvVars(process.env.MCP_POSTGRES_CMD);
+    if (pgCmd) {
+      try {
+        const { command, args } = parseCommandLine(pgCmd);
+        if (!command) throw new Error('MCP_POSTGRES_CMD ist leer/ungültig');
+        const unrestrictedArgs = ensureUnrestrictedArgs(args);
+        const pgEnv = {};
+        const uri = process.env.MCP_POSTGRES_URI
+          || process.env.MCP_POSTGRES_DATABASE_URI
+          || process.env.MCP_POSTGRES_URL
+          || process.env.DATABASE_URL
+          || process.env.POSTGRES_URL;
+        if (uri) {
+          pgEnv.DATABASE_URI = uri;
+        } else {
+          console.warn('[MCP] Postgres DATABASE_URI nicht gesetzt (setze MCP_POSTGRES_URI oder DATABASE_URL)');
+        }
+        const { client } = await startMcpClient('postgres', command, unrestrictedArgs, pgEnv);
+        try {
+          console.log('[MCP] Postgres client verbunden', {
+            command,
+            args: unrestrictedArgs,
+            uri: maskUri(uri || pgEnv.DATABASE_URI),
+          });
+        } catch (_) { }
+        clients.postgres = client;
+      } catch (e) {
+        console.warn('[MCP] Postgres start/connect failed:', e && e.message ? e.message : String(e));
+      }
     }
   }
 

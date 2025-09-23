@@ -221,16 +221,16 @@ sap.ui.define([
         userInput: "",
         isTyping: false,
         isStreaming: false,
-        statusMessage: "",
-        showSuggestions: false,
+        statusMessage: "Tipp: Melde dich vorab mit 'm365 login' im Browser an oder setze MCP_M365_ACCESS_TOKEN – dann kannst du Mail, Kalender und Excel direkt testen.",
+        showSuggestions: true,
         lastTrace: null,
         lastStreamText: '',
         lastStreamHtml: '',
         suggestions: [
-          { text: "Fasse den aktuellen Vorgang zusammen" },
-          { text: "Welche fehlenden Unterlagen brauche ich?" },
-          { text: "Erzeuge eine Kundenmail" },
-          { text: "Erkläre die Entscheidung" }
+          { text: "Zeige mir die neueste Mail aus dem Posteingang." },
+          { text: "Antworte auf die letzte Mail und bitte um fehlende Dokumente." },
+          { text: "Welche Termine stehen diese Woche im Kalender?" },
+          { text: "Lies die Tabelle 'Stammtisch Planung' aus der Excel im OneDrive." }
         ]
       });
     },
@@ -249,8 +249,8 @@ sap.ui.define([
       this.chatModel.setProperty("/userInput", "");
       this.chatModel.setProperty("/isStreaming", false);
       this.chatModel.setProperty("/isTyping", false);
-      this.chatModel.setProperty("/statusMessage", "");
-      this.chatModel.setProperty("/showSuggestions", false);
+      this.chatModel.setProperty("/statusMessage", "Tipp: Mit einer aktiven 'm365 login' Sitzung oder einem MCP_M365_ACCESS_TOKEN kannst du die Microsoft-365-Tools sofort ausprobieren.");
+      this.chatModel.setProperty("/showSuggestions", true);
       this.chatModel.setProperty("/lastTrace", null);
       this.chatModel.setProperty("/lastStreamText", '');
       this.chatModel.setProperty("/lastStreamHtml", '');
@@ -492,6 +492,7 @@ sap.ui.define([
       const text = (providedText != null ? String(providedText) : (chatManager.chatModel.getProperty("/userInput") || "")).trim();
       if (!text) { return; }
       chatManager.chatModel.setProperty("/userInput", "");
+      chatManager.chatModel.setProperty("/statusMessage", "");
       // Escape user text for safe HTML display in FormattedText
       const escapeHtml = (s) => String(s)
         .replace(/&/g, "&amp;")

@@ -72,11 +72,207 @@ function reduceOutput(cmd, raw) {
   catch (_) { return String(raw); }
 }
 
+function flattenPossibleText(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    const parts = [];
+    for (const entry of value) {
+      const text = flattenPossibleText(entry);
+      if (text) parts.push(text);
+    }
+    return parts.join('');
+  }
+  if (typeof value === 'object') {
+    if (typeof value.text === 'string') return value.text;
+    if (typeof value.output_text === 'string') return value.output_text;
+    if (typeof value.value === 'string') return value.value;
+    if (typeof value.content === 'string') return value.content;
+    if (Array.isArray(value.content)) {
+      const nested = flattenPossibleText(value.content);
+      if (nested) return nested;
+    }
+  }
+  return '';
+}
+
+function extractMessageText(message) {
+  if (!message) return '';
+  return flattenPossibleText(message.content ?? message);
+}
+
+function extractReturnValuesText(payload) {
+  if (!payload || typeof payload === 'number' || typeof payload === 'boolean') return '';
+  if (typeof payload === 'string') return payload;
+  if (Array.isArray(payload)) return flattenPossibleText(payload);
+  if (typeof payload === 'object') {
+    const keys = ['output_text', 'output', 'response', 'content', 'text', 'value', 'final', 'message'];
+    for (const key of keys) {
+      if (payload[key] !== undefined) {
+        const text = flattenPossibleText(payload[key]);
+        if (text) return text;
+      }
+    }
+    if (Array.isArray(payload.messages) && payload.messages.length) {
+      const last = payload.messages[payload.messages.length - 1];
+      const text = extractMessageText(last);
+      if (text) return text;
+    }
+  }
+  return '';
+}
+
+function extractFinalChunkText(chunk) {
+  if (!chunk || typeof chunk !== 'object') return '';
+  const direct = extractReturnValuesText(chunk.returnValues)
+    || extractReturnValuesText(chunk.final)
+    || extractReturnValuesText(chunk.finalOutput)
+    || extractReturnValuesText(chunk.data);
+  if (direct) return direct;
+  if (chunk.output !== undefined) {
+    const text = extractReturnValuesText(chunk.output);
+    if (text) return text;
+  }
+  if (chunk.agentOutcome && typeof chunk.agentOutcome === 'object') {
+    const text = extractReturnValuesText(chunk.agentOutcome.returnValues || chunk.agentOutcome.output);
+    if (text) return text;
+  }
+  return '';
+}
+
+function normaliseDateTimeInput(value) {
+  if (!value) return { iso: '', tz: '' };
+  if (typeof value === 'string') {
+    return { iso: value, tz: value.endsWith('Z') ? 'UTC' : '' };
+  }
+  if (typeof value === 'object') {
+    const iso = value.dateTime || value.date || value.iso || '';
+    const tz = value.timeZone || value.tz || '';
+    return { iso, tz };
+  }
+  return { iso: String(value), tz: '' };
+}
+
+function splitIsoToParts(iso) {
+  const str = String(iso || '');
+  const result = { iso: str, date: '', time: '' };
+  if (!str) return result;
+  const trimmed = str.replace(/\.(\d+)(Z)?$/, '$2');
+  const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}))/);
+  if (match) {
+    result.date = match[1];
+    result.time = match[2] || '';
+  }
+  return result;
+}
+
+function buildIsoSegment(parts) {
+  if (!parts) return '';
+  if (parts.date) {
+    return parts.time ? `${parts.date} ${parts.time}` : parts.date;
+  }
+  return parts.iso || '';
+}
+
+function formatDateRangeForSummary(startInput, endInput) {
+  const start = normaliseDateTimeInput(startInput);
+  const end = normaliseDateTimeInput(endInput);
+  const startParts = splitIsoToParts(start.iso);
+  const endParts = splitIsoToParts(end.iso);
+  const startSegment = buildIsoSegment(startParts);
+  const endSegment = buildIsoSegment(endParts);
+  let range = '';
+  if (startSegment && endSegment) {
+    if (startParts.date && endParts.date && startParts.date === endParts.date) {
+      if (startParts.time && endParts.time) {
+        range = `${startParts.date} ${startParts.time}–${endParts.time}`;
+      } else {
+        range = startSegment;
+      }
+    } else {
+      range = `${startSegment} → ${endSegment}`;
+    }
+  } else {
+    range = startSegment || endSegment;
+  }
+  const tzFallback = (start.iso && start.iso.endsWith('Z') && end.iso && end.iso.endsWith('Z')) ? 'UTC' : '';
+  const tz = start.tz || end.tz || tzFallback;
+  return range && tz ? `${range} (${tz})` : range;
+}
+
+function summariseToolResult({ toolName, toolMessage, toolArgs, rawText }) {
+  let payload;
+  if (toolMessage && typeof toolMessage === 'object') {
+    const extra = toolMessage.additional_kwargs;
+    if (extra && typeof extra === 'object') {
+      if (extra.output !== undefined) payload = extra.output;
+      else if (extra.data !== undefined) payload = extra.data;
+      else if (extra.content !== undefined) payload = extra.content;
+    }
+    if (payload === undefined && toolMessage.output !== undefined) payload = toolMessage.output;
+    if (payload === undefined && toolMessage.result !== undefined) payload = toolMessage.result;
+    if (payload === undefined && typeof toolMessage.content === 'object' && !Array.isArray(toolMessage.content)) {
+      payload = toolMessage.content;
+    }
+  }
+  if (payload === undefined && typeof rawText === 'string') {
+    const trimmed = rawText.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try { payload = JSON.parse(trimmed); }
+      catch (_) { payload = undefined; }
+    }
+  }
+
+  if (toolName === 'calendar.event.createOrUpdate') {
+    let args = toolArgs;
+    if (typeof args === 'string') {
+      try { args = JSON.parse(args); }
+      catch (_) { args = {}; }
+    }
+    const subject = typeof args?.subject === 'string' && args.subject.trim() ? args.subject.trim() : 'Termin';
+    const range = formatDateRangeForSummary(args?.start, args?.end);
+    const status = typeof payload?.status === 'string'
+      ? payload.status
+      : (args && args.eventId ? 'updated' : 'created');
+    const eventId = payload && typeof payload.eventId === 'string' ? payload.eventId : undefined;
+    const statusVerb = status === 'updated' ? 'aktualisiert' : 'erstellt';
+    let sentence = `Termin ${statusVerb}: '${subject}'`;
+    if (range) sentence += ` (${range})`;
+    if (eventId) sentence += ` [${eventId}]`;
+    return sentence;
+  }
+
+  if (payload && typeof payload === 'object') {
+    if (typeof payload.message === 'string' && payload.message.trim()) return payload.message.trim();
+    if (typeof payload.text === 'string' && payload.text.trim()) return payload.text.trim();
+    if (typeof payload.summary === 'string' && payload.summary.trim()) return payload.summary.trim();
+    if (typeof payload.output_text === 'string' && payload.output_text.trim()) return payload.output_text.trim();
+    if (typeof payload.status === 'string') {
+      const extraKeys = ['eventId', 'draftId', 'internetMessageId', 'attachmentId', 'driveItemId', 'filePath', 'feature'];
+      const extras = [];
+      for (const key of extraKeys) {
+        const val = payload[key];
+        if (val === undefined || val === null || val === '') continue;
+        extras.push(`${key}: ${val}`);
+      }
+      return extras.length ? `${payload.status}: ${extras.join(', ')}` : payload.status;
+    }
+  }
+
+  if (typeof rawText === 'string' && rawText.trim()) return rawText.trim();
+  if (payload !== undefined) {
+    try { return JSON.stringify(payload); }
+    catch (_) { }
+  }
+  return '';
+}
+
 let agentExecutor = null;
 let mcpClients = null;
 let agentInfo = { toolNames: [], modelName: '', provider: '' };
 const { unwrapError, safeJson } = require('./helpers/logging');
 const { enableHttpTrace } = require('./bootstrap/http-trace');
+const { createInProcessToolDefinitions } = require('./mcp-tool-registry');
 
 function sseWrite(res, data) {
   if (data == null) return;
@@ -176,25 +372,50 @@ async function initAgent() {
 
   // 2) Guarded proxy for MCP tool(s); only expose whitelisted name(s)
   const allTools = [];
-  const allowedM365 = (process.env.MCP_M365_TOOLS || 'm365_run_command')
-    .split(',').map(s => s.trim()).filter(Boolean);
-  if (mcpClients.m365 && allowedM365.includes('m365_run_command')) {
-    const guardedRun = new DynamicStructuredTool({
-      name: 'm365_run_command',
-      description: 'Sicherer Proxy für Microsoft 365 CLI Kommandos über MCP.',
-      schema: z.object({ command: z.string() }),
-      func: async ({ command }) => {
-        const safeCmd = rewriteCommandSafely(command);
-        const out = await mcpClients.m365.callTool({ name: 'm365_run_command', arguments: { command: safeCmd } });
-        const rawText = extractMcpText(out);
-        const fallback = typeof out === 'string' ? out : JSON.stringify(out);
-        const raw = typeof rawText === 'string' && rawText.trim() ? rawText : fallback;
-        const slim = reduceOutput(safeCmd, raw);
-        try { console.log('[M365][proxy]', { cmd: safeCmd, rawBytes: raw.length, slimBytes: slim.length, rawHash: hash(raw) }); } catch (_) {}
-        return slim; // Only reduced output goes back to the LLM
+  const m365AllowRaw = process.env.MCP_M365_TOOLS || '';
+  const m365AllowList = m365AllowRaw.split(',').map((s) => s.trim()).filter(Boolean);
+  const allowAllM365 = m365AllowList.length === 0 || m365AllowList.includes('*') || m365AllowList.includes('all');
+  if (mcpClients.m365 && typeof mcpClients.m365.callTool === 'function') {
+    try {
+      const manifest = typeof mcpClients.m365.listTools === 'function'
+        ? await mcpClients.m365.listTools()
+        : null;
+      if (manifest && Array.isArray(manifest.tools) && manifest.tools.length) {
+        const defs = createInProcessToolDefinitions({
+          manifest,
+          callTool: async ({ name, args }) => mcpClients.m365.callTool({ name, arguments: args }),
+          z,
+        });
+        for (const def of defs) {
+          if (!allowAllM365 && !m365AllowList.includes(def.name)) continue;
+          const tool = new DynamicStructuredTool({
+            name: def.name,
+            description: def.description,
+            schema: def.zodSchema,
+            func: async (input) => {
+              const output = await def.invoke(input);
+              const text = typeof output === 'string' ? output : safeJson(output);
+              const slim = reduceOutput(def.name, text);
+              try {
+                console.log('[M365][tool]', {
+                  tool: def.name,
+                  rawBytes: text.length,
+                  slimBytes: slim.length,
+                  rawHash: hash(text),
+                });
+              } catch (_) { }
+              return output;
+            },
+            metadata: def.metadata,
+          });
+          allTools.push(tool);
+        }
       }
-    });
-    allTools.push(guardedRun);
+    } catch (err) {
+      try {
+        console.warn('[M365][tools]', 'Registrierung fehlgeschlagen', err?.message || String(err));
+      } catch (_) {}
+    }
   }
 
   if (mcpClients.postgres) {
@@ -446,6 +667,36 @@ async function runAgentStreaming({ prompt, threadId, res }) {
   let step = 0;                // ReAct round number
   let awaitingTool = false;    // currently waiting for tool output
   let phase = 'init';          // 'init' | 'reason' | 'tool' | 'observation'
+  let pendingToolCall = null;  // last tool call issued by the LLM
+  let lastObservationText = '';
+  let lastObservationSource = '';
+  const emitAgentText = (rawText, { allowReasonStep = true, source = '' } = {}) => {
+    const text = typeof rawText === 'string' ? rawText : String(rawText || '');
+    if (!text) return false;
+    if (logOutput) {
+      try {
+        sentChars += text.length;
+        if (sentPreview.length < 800) {
+          const needed = 800 - sentPreview.length;
+          if (needed > 0) sentPreview += text.slice(0, needed);
+        }
+        const live = text.length > 160 ? text.slice(0, 160) + ' ... ' : text;
+        const label = source ? `[AGENT][send:${source}]` : '[AGENT][send]';
+        console.log(label, live);
+      } catch (_) { }
+    }
+    sseWriteChunked(res, text);
+    if (allowReasonStep && logSteps && !awaitingTool) {
+      try {
+        if (phase !== 'reason') {
+          step += 1;
+          console.log('[AGENT][step]', { step, action: 'reason', preview: text.slice(0, 200) });
+        }
+        phase = 'reason';
+      } catch (_) { }
+    }
+    return true;
+  };
   try {
     console.log('[AGENT][start]', {
       reqId,
@@ -471,13 +722,23 @@ async function runAgentStreaming({ prompt, threadId, res }) {
     content: `
 Du bist ein technischer Assistent für die ClaimPilot-Plattform. Sprich Deutsch, antworte kurz und strukturiert.
 
-Fokussiere dich auf PostgreSQL-Aufgaben:
-- Nutze "postgres_list_schemas" und "postgres_list_objects", um die Datenbank zu erkunden.
-- CRUD führst du mit "postgres_execute_sql" durch. SQL sauber formatieren, Änderungen klar beschreiben (z. B. "Schadensfall 4711 geschlossen"), aber keine reinen Roh-Resultsets ausgeben.
-- Performance- oder Diagnosefragen beantwortest du mit "postgres_explain_query", "postgres_get_top_queries", "postgres_analyze_db_health" oder den Index-Analyse-Tools.
-- Wenn ein Schritt scheitert, beschreibe knapp den Fehler und schlage einen nächsten Versuch vor.
+Verfügbare Werkzeuge:
+- Microsoft 365 (MCP): nutze sie deterministisch und mit expliziten IDs.
+  • "mail.latestMessage.get" und "mail.message.fetch" liefern Posteingangsdaten.
+  • Antworten/Weiterleiten erfolgen über "mail.message.replyDraft" bzw. "mail.message.send".
+  • Anhänge bearbeitest du mit "mail.attachment.download" oder "mail.attachment.uploadAndAttach".
+  • Termine verwaltest du mit den "calendar.*"-Tools.
+  • Excel-Daten liest/schreibst du via "excel.workbook.*" (Sheet-Namen und Session-ID immer angeben).
+  • Prüfe Verfügbarkeit/Token per "graph.health.check" oder "graph.token.acquire" bei Fehlern.
+- Datenbankaufgaben (PostgreSQL):
+  • Schema- und Objektübersicht über "postgres_list_schemas" / "postgres_list_objects".
+  • CRUD mit "postgres_execute_sql" und Änderungen knapp beschreiben (z. B. "Schadensfall 4711 geschlossen"), aber keine riesigen Roh-Resultsets zurückgeben.
+  • Performanceanalyse über "postgres_explain_query", "postgres_get_top_queries", "postgres_analyze_db_health" und die Index-Tools.
 
-Stoppe, sobald die Anforderung erfüllt ist.
+Arbeitsweise:
+- Nutze nur freigegebene Tools, prüfe Parameter sorgfältig, und halte die Antworten prägnant.
+- Beschreibe Fehlermeldungen knapp und schlage konkrete nächste Schritte vor.
+- Stoppe, sobald die Nutzeranforderung erfüllt ist.
 `.trim()
   };
   const userMessage = { role: 'user', content: String(prompt) };
@@ -539,48 +800,32 @@ Stoppe, sobald die Anforderung erfüllt ist.
       }
     );
 
+    let lastReturnText = '';
     for await (const chunk of stream) {
       // Agent text tokens
+      let chunkProvidedText = false;
       if (chunk && chunk.agent && Array.isArray(chunk.agent.messages)) {
         const msg = chunk.agent.messages[chunk.agent.messages.length - 1];
         if (msg && msg.content) {
-          const text = typeof msg.content === 'string'
-            ? msg.content
-            : Array.isArray(msg.content)
-              ? msg.content.map(p => (typeof p === 'string' ? p : p?.text || '')).join('')
-              : '';
+          const msgHasToolCalls = Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
+          const text = extractMessageText(msg);
           if (text) {
-            if (logOutput) {
-              try {
-                sentChars += text.length;
-                if (sentPreview.length < 800) {
-                  const needed = 800 - sentPreview.length;
-                  sentPreview += text.slice(0, needed);
-                }
-                // per-chunk live log (short preview)
-                const live = text.length > 160 ? text.slice(0, 160) + ' ... ' : text;
-                console.log('[AGENT][send]', live);
-              } catch (_) { }
+            if (emitAgentText(text, { allowReasonStep: !msgHasToolCalls })) {
+              chunkProvidedText = true;
             }
-            sseWriteChunked(res, text);
-            // Step logging: reasoning (no tool call in this message)
-            try {
-              const msgHasToolCalls = Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
-              if (logSteps && !msgHasToolCalls && !awaitingTool) {
-                if (phase !== 'reason') {
-                  step += 1;
-                  console.log('[AGENT][step]', { step, action: 'reason', preview: text.slice(0, 200) });
-                }
-                phase = 'reason';
-              }
-            } catch (_) { }
           }
-          if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+          if (msgHasToolCalls) {
             const call = msg.tool_calls[0];
             try { console.log('[AGENT][tool_start]', { tool: call.name, args: call.args || {} }); } catch (_) { }
             if (logSteps) {
               try { if (phase !== 'tool') { /* keep same step for this round */ } console.log('[AGENT][step]', { step: Math.max(step, 1), action: 'tool_call', tool: call.name }); } catch (_) { }
             }
+            let callArgs = call.args;
+            if (typeof callArgs === 'string') {
+              try { callArgs = JSON.parse(callArgs); }
+              catch (_) { callArgs = call.args; }
+            }
+            pendingToolCall = { name: call.name, args: callArgs };
             awaitingTool = true;
             phase = 'tool';
           }
@@ -602,9 +847,40 @@ Stoppe, sobald die Anforderung erfüllt ist.
             try { if (step === 0) step = 1; console.log('[AGENT][step]', { step, action: 'observation', preview: String(toolText).slice(0, 200) }); } catch (_) { }
           }
         }
+        const toolName = toolMsg?.name || pendingToolCall?.name || '';
+        const summary = summariseToolResult({
+          toolName,
+          toolMessage: toolMsg,
+          toolArgs: pendingToolCall ? pendingToolCall.args : undefined,
+          rawText: toolText,
+        });
+        const nextObservation = summary || (toolText && toolText.trim()) || '';
+        if (nextObservation) {
+          lastObservationText = nextObservation;
+          lastObservationSource = toolName || 'tool';
+        }
+        pendingToolCall = null;
         awaitingTool = false;
         phase = 'observation';
       }
+
+      const fallbackText = extractFinalChunkText(chunk);
+      if (fallbackText) {
+        lastReturnText = fallbackText;
+        if (!chunkProvidedText) {
+          if (emitAgentText(fallbackText, { source: 'return_values' })) {
+            chunkProvidedText = true;
+          }
+        }
+      }
+    }
+
+    if (sentChars === 0 && lastReturnText) {
+      awaitingTool = false;
+      emitAgentText(lastReturnText, { source: 'return_values_final' });
+    } else if (sentChars === 0 && lastObservationText) {
+      awaitingTool = false;
+      emitAgentText(lastObservationText, { source: `observation:${lastObservationSource || 'tool'}`, allowReasonStep: false });
     }
 
     const tookMs = Date.now() - startedAt;

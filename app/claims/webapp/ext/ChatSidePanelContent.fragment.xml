@@ -22,6 +22,12 @@
                 press="onStopStreaming"/>
         </Toolbar>
 
+        <Text
+            text="{chat>/statusMessage}"
+            visible="{= !!${chat>/statusMessage} }"
+            class="cp-status-message"
+            wrapping="true"/>
+
         <!-- Suggestions (visible when not streaming and initial state) -->
         <HBox
             width="100%"

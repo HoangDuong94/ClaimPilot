@@ -108,16 +108,16 @@ async function streamGenAI(prompt, res, opts = {}) {
 }
 
 cds.on('bootstrap', (app) => {
-  // Frühzeitige Initialisierung des Agents inkl. MCP-Clients (vorübergehend deaktiviert)
-  // (async () => {
-  //   try {
-  //     const { initAgent } = require('./agent');
-  //     await initAgent();
-  //     console.log('[AGENT][startup]', { status: 'initialized' });
-  //   } catch (e) {
-  //     console.warn('[AGENT][startup_failed]', e && e.message ? e.message : String(e));
-  //   }
-  // })();
+  // Frühzeitige Initialisierung des Agents inkl. MCP-Clients
+  (async () => {
+    try {
+      const { initAgent } = require('./agent');
+      await initAgent();
+      console.log('[AGENT][startup]', { status: 'initialized' });
+    } catch (e) {
+      console.warn('[AGENT][startup_failed]', e && e.message ? e.message : String(e));
+    }
+  })();
 
   // Server-Sent Events endpoint for streaming chat responses
   app.post('/ai/stream', expressJson(), async (req, res) => {

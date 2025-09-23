@@ -144,6 +144,8 @@ Mit diesen Schritten kann die CAP-App lokal oder in hybriden Szenarien gegen Pos
 
 ## Troubleshooting
 
+- Ausführlicher Leitfaden bei Timeout/Verbindungsproblemen: siehe `docs/troubleshoot-postgres-timeout.md`.
+
 - ECONNREFUSED/Timeout:
   - Port korrekt? Container läuft? Host-Firewall/Proxy prüfen.
 - `role "claimspilot" does not exist`:
@@ -171,4 +173,3 @@ Mit diesen Schritten kann die CAP-App lokal oder in hybriden Szenarien gegen Pos
   ```bash
   npx cds deploy --to postgres --profile postgres
   ```
-
