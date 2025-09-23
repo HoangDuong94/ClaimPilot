@@ -28,18 +28,6 @@
             class="cp-status-message"
             wrapping="true"/>
 
-        <!-- Suggestions (visible when not streaming and initial state) -->
-        <HBox
-            width="100%"
-            visible="{chat>/showSuggestions}"
-            class="cp-suggestions"
-            wrap="Wrap"
-            items="{chat>/suggestions}">
-            <items>
-                <Button text="{chat>text}" type="Default" press="onSuggestionPress" class="cp-suggestion-btn"/>
-            </items>
-        </HBox>
-
         <ScrollContainer id="chatHistoryScrollContainerInSidePanel" width="100%" height="100%" vertical="true">
             <VBox width="100%" class="cp-chat-container">
                 <List
@@ -47,7 +35,8 @@
                     items="{chat>/chatHistory}"
                     width="100%"
                     inset="false"
-                    showSeparators="None">
+                    showSeparators="None"
+                    showNoData="false">
                     <CustomListItem>
                         <HBox width="100%"
                              justifyContent="{= ${chat>type} === 'user' ? 'End' : 'Start'}"
@@ -83,7 +72,8 @@
                     rows="3"
                     width="100%"
                     growing="true"
-                    growingMaxLines="6"/>
+                    growingMaxLines="6"
+                    liveChange="onInputLiveChange"/>
             </VBox>
             <Button
                 id="sendButton"
@@ -92,6 +82,33 @@
                 enabled="{= !${chat>/isStreaming} }"
                 press="onSendChatMessageInSidePanel"/>
         </HBox>
+
+        <dependents>
+            <Popover
+                id="mentionPopover"
+                class="cpMentionPopover"
+                placement="Auto"
+                showHeader="false"
+                showArrow="false"
+                contentWidth="28rem"
+                horizontalScrolling="false"
+                afterClose="onMentionPopoverClosed">
+                <List
+                    id="mentionList"
+                    mode="SingleSelectMaster"
+                    includeItemInSelection="true"
+                    itemPress="onMentionListItemPress"
+                    items="{chat>/suggestions}">
+                    <items>
+                        <CustomListItem type="Active" press="onMentionItemPress">
+                            <VBox width="100%" class="cpMentionItem">
+                                <Text text="{chat>text}" wrapping="true" class="cpMentionItemText"/>
+                            </VBox>
+                        </CustomListItem>
+                    </items>
+                </List>
+            </Popover>
+        </dependents>
     </VBox>
 
 </core:FragmentDefinition>

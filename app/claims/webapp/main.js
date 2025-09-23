@@ -5,10 +5,11 @@ sap.ui.define([
   "sap/ui/layout/SplitterLayoutData",
   "sap/ui/core/Fragment",
   "sap/ui/model/json/JSONModel",
+  "sap/ui/model/Filter",
   "sap/m/App",
   "sap/m/Page",
   "sap/m/Panel"
-], function (Component, ComponentContainer, Splitter, SplitterLayoutData, Fragment, JSONModel, App, Page, Panel) {
+], function (Component, ComponentContainer, Splitter, SplitterLayoutData, Fragment, JSONModel, Filter, App, Page, Panel) {
   "use strict";
 
   const chatManager = {
@@ -16,6 +17,11 @@ sap.ui.define([
     feAppComponentInstance: null,
     rightPane: null,
     _currentAbortController: null,
+    isMentionOpen: false,
+    _mentionTokenStart: null,
+    _mentionCursor: null,
+    _mentionValue: '',
+    _mentionFilter: '',
 
     // Render a safe, readable HTML from LLM markdown/plain responses
     // opts: { autoParagraphMode: 'fallback' | 'never' }
@@ -221,8 +227,8 @@ sap.ui.define([
         userInput: "",
         isTyping: false,
         isStreaming: false,
-        statusMessage: "Tipp: Melde dich vorab mit 'm365 login' im Browser an oder setze MCP_M365_ACCESS_TOKEN – dann kannst du Mail, Kalender und Excel direkt testen.",
-        showSuggestions: true,
+        statusMessage: "",
+        showSuggestions: false,
         lastTrace: null,
         lastStreamText: '',
         lastStreamHtml: '',
@@ -249,8 +255,8 @@ sap.ui.define([
       this.chatModel.setProperty("/userInput", "");
       this.chatModel.setProperty("/isStreaming", false);
       this.chatModel.setProperty("/isTyping", false);
-      this.chatModel.setProperty("/statusMessage", "Tipp: Mit einer aktiven 'm365 login' Sitzung oder einem MCP_M365_ACCESS_TOKEN kannst du die Microsoft-365-Tools sofort ausprobieren.");
-      this.chatModel.setProperty("/showSuggestions", true);
+      this.chatModel.setProperty("/statusMessage", "");
+      this.chatModel.setProperty("/showSuggestions", false);
       this.chatModel.setProperty("/lastTrace", null);
       this.chatModel.setProperty("/lastStreamText", '');
       this.chatModel.setProperty("/lastStreamHtml", '');
@@ -479,6 +485,7 @@ sap.ui.define([
   const chatController = {
     onSendChatMessageInSidePanel: async function (overrideText) {
       let providedText = overrideText;
+      this._closeMentionPopover();
       if (providedText && typeof providedText === "object") {
         const isEventLike =
           (providedText.isA && providedText.isA("sap.ui.base.Event")) ||
@@ -539,6 +546,7 @@ sap.ui.define([
     },
 
     onClearChat: function () {
+      this._closeMentionPopover();
       chatManager.resetConversation();
     },
 
@@ -566,10 +574,282 @@ sap.ui.define([
       } catch (e) { /* ignore */ }
     },
 
-    onSuggestionPress: function (oEvent) {
-      const s = oEvent.getSource().getText();
-      chatManager.chatModel.setProperty("/showSuggestions", false);
-      this.onSendChatMessageInSidePanel(s);
+    onInputLiveChange: function (oEvent) {
+      const value = oEvent.getParameter("value");
+      chatManager.chatModel.setProperty("/userInput", value);
+      this._refreshMentionSuggestions(oEvent.getSource());
+    },
+
+    onMentionPopoverClosed: function () {
+      this._resetMentionState();
+    },
+
+    onMentionItemPress: function (oEvent) {
+      const item = oEvent.getSource && oEvent.getSource();
+      if (!item) { return; }
+      const ctx = item.getBindingContext("chat");
+      const selectedText = ctx && ctx.getProperty("text");
+      if (!selectedText) {
+        this._closeMentionPopover();
+        return;
+      }
+      this._applyMentionSelection(selectedText);
+    },
+
+    onMentionListItemPress: function (oEvent) {
+      const item = oEvent.getParameter && oEvent.getParameter('listItem');
+      if (!item) { return; }
+      const ctx = item.getBindingContext("chat");
+      const selectedText = ctx && ctx.getProperty("text");
+      if (!selectedText) {
+        this._closeMentionPopover();
+        return;
+      }
+      this._applyMentionSelection(selectedText);
+    },
+
+    _getInputControl: function () {
+      try { return sap.ui.core.Fragment.byId("chatSidePanelFragmentGlobal", "chatInputField"); }
+      catch (e) { return null; }
+    },
+
+    _getMentionPopover: function () {
+      try { return sap.ui.core.Fragment.byId("chatSidePanelFragmentGlobal", "mentionPopover"); }
+      catch (e) { return null; }
+    },
+
+    _getMentionList: function () {
+      try { return sap.ui.core.Fragment.byId("chatSidePanelFragmentGlobal", "mentionList"); }
+      catch (e) { return null; }
+    },
+
+    _handleInputKeydown: function (ev, inputControl) {
+      const popover = this._getMentionPopover();
+      const mentionOpen = chatManager.isMentionOpen && popover && popover.isOpen();
+
+      if (mentionOpen) {
+        if (ev.key === 'ArrowDown' || ev.key === 'Tab') {
+          ev.preventDefault();
+          this._moveMentionSelection(1);
+          return;
+        }
+        if (ev.key === 'ArrowUp' || (ev.shiftKey && ev.key === 'Tab')) {
+          ev.preventDefault();
+          this._moveMentionSelection(-1);
+          return;
+        }
+        if (ev.key === 'Enter' && !ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+          ev.preventDefault();
+          const list = this._getMentionList();
+          let item = list && list.getSelectedItem ? list.getSelectedItem() : null;
+          if (!item && list && list.getItems) {
+            const items = list.getItems();
+            item = items && items.length ? items[0] : null;
+          }
+          if (item) {
+            const ctx = item.getBindingContext("chat");
+            const selectedText = ctx && ctx.getProperty("text");
+            this._applyMentionSelection(selectedText);
+          } else {
+            this._closeMentionPopover();
+          }
+          return;
+        }
+        if (ev.key === 'Escape') {
+          ev.preventDefault();
+          this._closeMentionPopover();
+          return;
+        }
+      }
+
+      if (ev.key === "Enter" && !ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+        ev.preventDefault();
+        const val = inputControl.getValue();
+        chatManager.chatModel.setProperty("/userInput", val);
+        if (typeof inputControl.fireChange === 'function') {
+          inputControl.fireChange({ value: val });
+        }
+        this.onSendChatMessageInSidePanel(val);
+        return;
+      }
+
+      if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(ev.key)) {
+        setTimeout(() => {
+          try { this._refreshMentionSuggestions(inputControl); }
+          catch (e0) { /* ignore */ }
+        }, 0);
+      }
+    },
+
+    _moveMentionSelection: function (step) {
+      const list = this._getMentionList();
+      if (!list || !list.getItems) { return; }
+      const items = list.getItems();
+      if (!items.length) { return; }
+      const current = list.getSelectedItem ? list.getSelectedItem() : null;
+      let idx = current ? items.indexOf(current) : -1;
+      if (idx === -1) {
+        idx = step > 0 ? 0 : items.length - 1;
+      } else {
+        idx = (idx + step + items.length) % items.length;
+      }
+      if (list.setSelectedItem) {
+        list.setSelectedItem(items[idx], true);
+      }
+    },
+
+    _refreshMentionSuggestions: function (oTextArea) {
+      if (!oTextArea || typeof oTextArea.getValue !== 'function') {
+        this._closeMentionPopover();
+        return;
+      }
+      const domRef = oTextArea.getFocusDomRef && oTextArea.getFocusDomRef();
+      if (!domRef || domRef.selectionStart == null) {
+        this._closeMentionPopover();
+        return;
+      }
+      const value = oTextArea.getValue() || '';
+      const cursor = domRef.selectionStart != null ? domRef.selectionStart : (chatManager._mentionCursor != null ? chatManager._mentionCursor : value.length);
+      const tokenStart = this._locateMentionTokenStart(value, cursor);
+      if (tokenStart === -1) {
+        this._closeMentionPopover();
+        return;
+      }
+
+      const filterValueRaw = value.slice(tokenStart + 1, cursor);
+      const filterValue = filterValueRaw.trim().toLowerCase();
+
+      const popover = this._getMentionPopover();
+      const list = this._getMentionList();
+      if (!popover || !list) { return; }
+
+      const binding = list.getBinding && list.getBinding("items");
+      if (binding) {
+        const filters = [];
+        if (filterValue) {
+          filters.push(new Filter({
+            path: "text",
+            test: (text) => typeof text === 'string' && text.toLowerCase().indexOf(filterValue) !== -1
+          }));
+        }
+        binding.filter(filters);
+      }
+
+      const items = list.getItems ? list.getItems() : [];
+      if (!items.length) {
+        this._closeMentionPopover();
+        return;
+      }
+
+      if (list.removeSelections) { list.removeSelections(true); }
+      chatManager.isMentionOpen = true;
+      chatManager._mentionTokenStart = tokenStart;
+      chatManager._mentionFilter = filterValueRaw;
+      chatManager._mentionCursor = cursor;
+      chatManager._mentionValue = value;
+
+      if (popover.isOpen && popover.isOpen()) {
+        if (popover.rerender) { popover.rerender(); }
+      } else if (popover.openBy) {
+        popover.openBy(oTextArea);
+      }
+    },
+
+    _locateMentionTokenStart: function (value, cursor) {
+      if (!value || cursor == null) { return -1; }
+      let idx = cursor - 1;
+      while (idx >= 0) {
+        const ch = value[idx];
+        if (ch === '@') {
+          if (idx > 0) {
+            const prev = value[idx - 1];
+            if (prev && !/\s/.test(prev)) {
+              return -1;
+            }
+          }
+          return idx;
+        }
+        if (/\s/.test(ch)) {
+          return -1;
+        }
+        idx -= 1;
+      }
+      return -1;
+    },
+
+    _applyMentionSelection: function (selectedText) {
+      if (!selectedText) {
+        this._closeMentionPopover();
+        return;
+      }
+      const oTextArea = this._getInputControl();
+      const domRef = oTextArea && oTextArea.getFocusDomRef && oTextArea.getFocusDomRef();
+      if (!oTextArea || !domRef) {
+        this._closeMentionPopover();
+        return;
+      }
+      const currentValue = oTextArea.getValue() || '';
+      let cursor;
+      if (domRef === document.activeElement && domRef.selectionStart != null) {
+        cursor = domRef.selectionStart;
+      } else if (chatManager._mentionCursor != null) {
+        cursor = chatManager._mentionCursor;
+      } else {
+        cursor = currentValue.length;
+      }
+      let tokenStart = chatManager._mentionTokenStart;
+      if (tokenStart == null || tokenStart < 0 || currentValue[tokenStart] !== '@') {
+        tokenStart = this._locateMentionTokenStart(currentValue, cursor);
+        if (tokenStart === -1) {
+          this._closeMentionPopover();
+          return;
+        }
+      }
+
+      const tokenEnd = cursor;
+      const before = currentValue.slice(0, tokenStart);
+      const after = currentValue.slice(tokenEnd);
+      const clean = String(selectedText).trim();
+      const needsTrailingSpace = after.length === 0 ? true : !/^\s/.test(after);
+      const insertion = needsTrailingSpace ? clean + ' ' : clean;
+      const newValue = before + insertion + after;
+      oTextArea.setValue(newValue);
+      chatManager.chatModel.setProperty("/userInput", newValue);
+
+      this._closeMentionPopover();
+      setTimeout(() => {
+        try {
+          oTextArea.focus();
+          const dom = oTextArea.getFocusDomRef();
+          if (dom && typeof dom.setSelectionRange === 'function') {
+            const pos = before.length + clean.length + (needsTrailingSpace ? 1 : 0);
+            dom.setSelectionRange(pos, pos);
+          }
+        } catch (e) { /* ignore */ }
+      }, 0);
+    },
+
+    _closeMentionPopover: function () {
+      const popover = this._getMentionPopover();
+      if (popover && popover.isOpen && popover.isOpen()) {
+        popover.close();
+      } else {
+        this._resetMentionState();
+      }
+    },
+
+    _resetMentionState: function () {
+      chatManager.isMentionOpen = false;
+      chatManager._mentionTokenStart = null;
+      chatManager._mentionFilter = '';
+      chatManager._mentionCursor = null;
+      chatManager._mentionValue = '';
+      const list = this._getMentionList();
+      if (list) {
+        if (list.removeSelections) { list.removeSelections(true); }
+        const binding = list.getBinding && list.getBinding("items");
+        if (binding) { binding.filter([]); }
+      }
     }
   };
 
@@ -584,23 +864,36 @@ sap.ui.define([
       controller: chatController
     });
 
-    // Enable Enter-to-send on the TextArea; ensure latest value is in the model before sending
+    // Enable Enter-to-send on the TextArea and wire mention shortcuts
     try {
       const input = sap.ui.core.Fragment.byId("chatSidePanelFragmentGlobal", "chatInputField");
       if (input && input.attachBrowserEvent) {
         input.attachBrowserEvent("keydown", function (ev) {
-          if (ev.key === "Enter" && !ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
-            ev.preventDefault();
+          chatController._handleInputKeydown.call(chatController, ev, input);
+        });
+        input.attachBrowserEvent("focusout", function () {
+          setTimeout(() => {
             try {
-              const val = input.getValue();
-              // Write to bound model first so getProperty sees the latest
-              chatManager.chatModel.setProperty("/userInput", val);
-              // Also trigger the control's change lifecycle for consistency
-              if (typeof input.fireChange === 'function') input.fireChange({ value: val });
-              // Send using the captured value to avoid any race
-              chatController.onSendChatMessageInSidePanel(val);
-            } catch (e) { /* ignore */ }
-          }
+              const popover = chatController._getMentionPopover();
+              if (!popover) {
+                chatController._resetMentionState();
+                return;
+              }
+              const isOpen = popover.isOpen && popover.isOpen();
+              if (!isOpen) {
+                chatController._resetMentionState();
+                return;
+              }
+              const popDom = popover.getDomRef && popover.getDomRef();
+              const active = document.activeElement;
+              if (popDom && active && popDom.contains(active)) {
+                return;
+              }
+              chatController._closeMentionPopover();
+            } catch (e) {
+              chatController._closeMentionPopover();
+            }
+          }, 0);
         });
       }
     } catch (e) { /* ignore */ }
