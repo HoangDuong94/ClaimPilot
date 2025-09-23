@@ -170,13 +170,15 @@ async function initAgent() {
 
   // 1) MCP Clients (only M365 for now)
   mcpClients = await initAllMCPClients();
+  try {
+    console.log('[AGENT][mcp_clients]', { available: Object.keys(mcpClients || {}) });
+  } catch (_) { }
 
   // 2) Guarded proxy for MCP tool(s); only expose whitelisted name(s)
   const allTools = [];
-  const allowed = (process.env.MCP_M365_TOOLS || 'm365_run_command')
+  const allowedM365 = (process.env.MCP_M365_TOOLS || 'm365_run_command')
     .split(',').map(s => s.trim()).filter(Boolean);
-  try { console.log('[AGENT][tools_whitelist]', { allowed }); } catch (_) {}
-  if (mcpClients.m365 && allowed.includes('m365_run_command')) {
+  if (mcpClients.m365 && allowedM365.includes('m365_run_command')) {
     const guardedRun = new DynamicStructuredTool({
       name: 'm365_run_command',
       description: 'Sicherer Proxy für Microsoft 365 CLI Kommandos über MCP.',
@@ -193,6 +195,161 @@ async function initAgent() {
       }
     });
     allTools.push(guardedRun);
+  }
+
+  if (mcpClients.postgres) {
+    const callPostgres = async (toolName, args) => {
+      const out = await mcpClients.postgres.callTool({ name: toolName, arguments: args });
+      let raw;
+      try {
+        const text = extractMcpText(out);
+        const fallback = typeof out === 'string' ? out : JSON.stringify(out);
+        raw = text && text.trim() ? text : fallback;
+      } catch (_) {
+        raw = String(out || '');
+      }
+      const slim = reduceOutput(toolName, raw);
+      try {
+        console.log('[PG][proxy]', { tool: toolName, rawBytes: raw.length, slimBytes: slim.length, rawHash: hash(raw) });
+      } catch (_) { }
+      return slim;
+    };
+
+    const allowedPostgres = (process.env.MCP_POSTGRES_TOOLS
+      || 'postgres_execute_sql,postgres_list_schemas,postgres_list_objects,postgres_get_object_details,postgres_explain_query,postgres_get_top_queries,postgres_analyze_db_health')
+      .split(',').map(s => s.trim()).filter(Boolean);
+    try { console.log('[AGENT][tools_whitelist]', { postgres: allowedPostgres }); } catch (_) {}
+
+    if (allowedPostgres.includes('postgres_execute_sql')) {
+      allTools.push(new DynamicStructuredTool({
+        name: 'postgres_execute_sql',
+        description: 'Führt SQL (CRUD) auf der ClaimPilot-Datenbank aus. Erwartet reines SQL, keine zusätzliche Kontextantwort.',
+        schema: z.object({ sql: z.string().min(1, 'SQL ist erforderlich') }),
+        func: async ({ sql }) => callPostgres('execute_sql', { sql }),
+      }));
+    }
+
+    if (allowedPostgres.includes('postgres_list_schemas')) {
+      allTools.push(new DynamicStructuredTool({
+        name: 'postgres_list_schemas',
+        description: 'Listet verfügbare Schemas im aktuellen PostgreSQL-Cluster.',
+        schema: z.object({}).optional(),
+        func: async () => callPostgres('list_schemas', {}),
+      }));
+    }
+
+    if (allowedPostgres.includes('postgres_list_objects')) {
+      allTools.push(new DynamicStructuredTool({
+        name: 'postgres_list_objects',
+        description: 'Listet Tabellen, Views, Sequenzen oder Erweiterungen in einem Schema.',
+        schema: z.object({
+          schema_name: z.string().min(1, 'Schema benötigt'),
+          object_type: z.enum(['table', 'view', 'sequence', 'extension']).default('table'),
+        }),
+        func: async ({ schema_name, object_type }) => callPostgres('list_objects', { schema_name, object_type }),
+      }));
+    }
+
+    if (allowedPostgres.includes('postgres_get_object_details')) {
+      allTools.push(new DynamicStructuredTool({
+        name: 'postgres_get_object_details',
+        description: 'Zeigt Spalten, Constraints und Indizes für Tabellen/Views sowie Details für Sequenzen oder Erweiterungen.',
+        schema: z.object({
+          schema_name: z.string().min(1, 'Schema benötigt'),
+          object_name: z.string().min(1, 'Objektname benötigt'),
+          object_type: z.enum(['table', 'view', 'sequence', 'extension']).default('table'),
+        }),
+        func: async ({ schema_name, object_name, object_type }) => callPostgres('get_object_details', { schema_name, object_name, object_type }),
+      }));
+    }
+
+    if (allowedPostgres.includes('postgres_explain_query')) {
+      allTools.push(new DynamicStructuredTool({
+        name: 'postgres_explain_query',
+        description: 'Erzeugt Explain-Plan für eine SQL-Abfrage. Optional mit ANALYZE oder hypothetischen Indizes.',
+        schema: z.object({
+          sql: z.string().min(1, 'SQL ist erforderlich'),
+          analyze: z.boolean().optional(),
+          hypothetical_indexes: z.array(z.object({
+            table: z.string(),
+            columns: z.array(z.string()).nonempty(),
+            using: z.string().optional(),
+          })).optional(),
+        }),
+        func: async ({ sql, analyze, hypothetical_indexes }) => callPostgres('explain_query', {
+          sql,
+          analyze: analyze ?? false,
+          hypothetical_indexes: hypothetical_indexes || [],
+        }),
+      }));
+    }
+
+    if (allowedPostgres.includes('postgres_get_top_queries')) {
+      allTools.push(new DynamicStructuredTool({
+        name: 'postgres_get_top_queries',
+        description: 'Zeigt auffällige SQLs basierend auf Ausführungszeit oder Ressourcenverbrauch.',
+        schema: z.object({
+          sort_by: z.enum(['resources', 'mean_time', 'total_time']).default('resources'),
+          limit: z.number().int().min(1).max(50).optional(),
+        }),
+        func: async ({ sort_by, limit }) => callPostgres('get_top_queries', {
+          sort_by: sort_by || 'resources',
+          limit: limit ?? 10,
+        }),
+      }));
+    }
+
+    if (allowedPostgres.includes('postgres_analyze_db_health')) {
+      allTools.push(new DynamicStructuredTool({
+        name: 'postgres_analyze_db_health',
+        description: 'Führt die integrierten Health-Checks (Index, Vacuum, Sequenzen usw.) aus.',
+        schema: z.object({
+          health_type: z.string().optional(),
+        }),
+        func: async ({ health_type }) => callPostgres('analyze_db_health', {
+          health_type: health_type || 'all',
+        }),
+      }));
+    }
+
+    if (allowedPostgres.includes('postgres_analyze_workload_indexes')) {
+      allTools.push(new DynamicStructuredTool({
+        name: 'postgres_analyze_workload_indexes',
+        description: 'Sucht Indexempfehlungen für das Gesamtsystem (nutzt pg_stat_statements).',
+        schema: z.object({
+          max_index_size_mb: z.number().int().min(1).optional(),
+          method: z.enum(['dta', 'llm']).optional(),
+        }),
+        func: async ({ max_index_size_mb, method }) => callPostgres('analyze_workload_indexes', {
+          max_index_size_mb: max_index_size_mb ?? 10000,
+          method: method || 'dta',
+        }),
+      }));
+    }
+
+    if (allowedPostgres.includes('postgres_analyze_query_indexes')) {
+      allTools.push(new DynamicStructuredTool({
+        name: 'postgres_analyze_query_indexes',
+        description: 'Analysiert benannte SQL-Statements und schlägt Indizes vor.',
+        schema: z.object({
+          queries: z.array(z.string().min(1)).min(1).max(10),
+          max_index_size_mb: z.number().int().min(1).optional(),
+          method: z.enum(['dta', 'llm']).optional(),
+        }),
+        func: async ({ queries, max_index_size_mb, method }) => callPostgres('analyze_query_indexes', {
+          queries,
+          max_index_size_mb: max_index_size_mb ?? 10000,
+          method: method || 'dta',
+        }),
+      }));
+    }
+  }
+
+  const toolNames = allTools.map(t => t?.name || 'unknown');
+  if (toolNames.length) {
+    try { console.log('[AGENT][tools_loaded]', { count: toolNames.length, names: toolNames }); } catch (_) { }
+  } else {
+    try { console.warn('[AGENT][tools_loaded]', { count: 0, reason: 'keine Tools konfiguriert' }); } catch (_) { }
   }
 
   // 3) LLM + in-memory checkpointing
@@ -253,7 +410,7 @@ async function initAgent() {
 
   // capture agent info for diagnostics
   try {
-    agentInfo.toolNames = (allTools || []).map(t => t?.name || 'unknown');
+    agentInfo.toolNames = toolNames;
     agentInfo.modelName = llmProvider?.modelName
       || llm?.lc_serializable?.kwargs?.model
       || process.env.AI_MODEL_NAME
@@ -312,15 +469,15 @@ async function runAgentStreaming({ prompt, threadId, res }) {
   const systemMessage = {
     role: 'system',
     content: `
-Du hilfst bei drei Aufgaben rund um Microsoft 365: Status prüfen, neueste Mail zusammenfassen, Termin erstellen. Sprich Deutsch, formuliere kurz.
+Du bist ein technischer Assistent für die ClaimPilot-Plattform. Sprich Deutsch, antworte kurz und strukturiert.
 
-Status: führe "m365 status --output json" aus und gib nur connectedAs und cloudType zurück.
+Fokussiere dich auf PostgreSQL-Aufgaben:
+- Nutze "postgres_list_schemas" und "postgres_list_objects", um die Datenbank zu erkunden.
+- CRUD führst du mit "postgres_execute_sql" durch. SQL sauber formatieren, Änderungen klar beschreiben (z. B. "Schadensfall 4711 geschlossen"), aber keine reinen Roh-Resultsets ausgeben.
+- Performance- oder Diagnosefragen beantwortest du mit "postgres_explain_query", "postgres_get_top_queries", "postgres_analyze_db_health" oder den Index-Analyse-Tools.
+- Wenn ein Schritt scheitert, beschreibe knapp den Fehler und schlage einen nächsten Versuch vor.
 
-Neueste Mail: wenn der Befehl unklar ist, starte mit "m365 outlook message list --help". Danach verwende "m365 outlook message list --folderName Inbox --output json --query \"[0]\"". Aus der Antwort nutzt du subject, from.emailAddress.name, from.emailAddress.address, receivedDateTime und bodyPreview (auf 120 Zeichen kürzen). Falls bodyPreview fehlt, hole sie einmal über "m365 outlook message get --id \"<id>\" --output json". Antworte als vier Zeilen (Betreff, Von, Datum, Vorschau). Roh-JSON nie direkt ausgeben.
-
-Kalender: "m365 outlook event add" mit passenden Parametern und anschließend kurz bestätigen.
-
-Vermeide weitere Versuche, sobald das Ziel erreicht ist.
+Stoppe, sobald die Anforderung erfüllt ist.
 `.trim()
   };
   const userMessage = { role: 'user', content: String(prompt) };
@@ -517,4 +674,4 @@ Vermeide weitere Versuche, sobald das Ziel erreicht ist.
   }
 }
 
-module.exports = { runAgentStreaming };
+module.exports = { runAgentStreaming, initAgent };

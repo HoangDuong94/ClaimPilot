@@ -42,29 +42,21 @@
       "version": "v4"
     },
     "features": {
-      "odata_new_parser": true
+      "odata_new_parser": false
     },
     "requires": {
       "db": {
         "kind": "postgres",
         "impl": "@cap-js/postgres",
         "credentials": {
-          "host": "{env.POSTGRES_HOST}",
-          "port": "{env.POSTGRES_PORT}",
-          "database": "{env.POSTGRES_DATABASE}",
-          "user": "{env.POSTGRES_USER}",
-          "password": "{env.POSTGRES_PASSWORD}",
+          "url": "{env.DATABASE_URL}",
           "schema": "public"
         },
         "pool": {
-          "acquireTimeoutMillis": 10000,
-          "destroyTimeoutMillis": 2000,
-          "min": 0,
-          "max": 10
-        },
-        "client": {
-          "connectionTimeoutMillis": 10000,
-          "connectionString": "{env.DATABASE_URL}"
+          "acquireTimeoutMillis": 30000,
+          "destroyTimeoutMillis": 5000,
+          "min": 2,
+          "max": 20
         }
       }
     },
@@ -79,6 +71,12 @@
           "credentials": {
             "url": "{env.DATABASE_URL}",
             "schema": "public"
+          },
+          "pool": {
+            "acquireTimeoutMillis": 30000,
+            "destroyTimeoutMillis": 5000,
+            "min": 2,
+            "max": 20
           }
         }
       },
