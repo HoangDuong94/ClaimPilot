@@ -112,14 +112,15 @@ test('excel.workbook.readRange forwards defaults and returns structured values',
     },
     graph: {}, tooling: {}
   });
+  const validSession = '12345678-1234-1234-1234-1234567890ab';
   const result = await handlers['excel.workbook.readRange']({
     driveItemId: 'drive-1',
-    workbookSession: 'session-xyz',
+    workbookSession: validSession,
     sheetName: 'Tabelle1'
   });
   assert.deepEqual(received, {
     driveItemId: 'drive-1',
-    workbookSession: 'session-xyz',
+    workbookSession: validSession,
     sheetName: 'Tabelle1',
     range: undefined,
     valuesOnly: true,
@@ -129,6 +130,129 @@ test('excel.workbook.readRange forwards defaults and returns structured values',
     address: 'Tabelle1!A1:B2',
     values: [["A", "B"], ["C", "D"]]
   });
+});
+
+test('excel.workbook tools allow missing workbook session', async () => {
+  const createM365ToolHandlers = loadFactory();
+  const captured = { listSheets: null, readRange: null };
+  const handlers = createM365ToolHandlers({
+    mail: {}, calendar: {}, drive: {},
+    excel: {
+      async listSheets(args) {
+        captured.listSheets = args;
+        return { sheets: ['Sheet1'] };
+      },
+      async readRange(args) {
+        captured.readRange = args;
+        return { address: 'Sheet1!A1:B2', values: [['A']] };
+      },
+    },
+    graph: {}, tooling: {}
+  });
+  const sheetResult = await handlers['excel.workbook.listSheets']({ driveItemId: 'drive-1' });
+  const rangeResult = await handlers['excel.workbook.readRange']({ driveItemId: 'drive-1' });
+  assert.deepEqual(sheetResult, { sheets: ['Sheet1'] });
+  assert.deepEqual(rangeResult, { address: 'Sheet1!A1:B2', values: [['A']] });
+  assert.equal(captured.listSheets.workbookSession, undefined);
+  assert.equal(captured.readRange.workbookSession, undefined);
+});
+
+test('excel workbook handlers drop placeholder workbook sessions', async () => {
+  const createM365ToolHandlers = loadFactory();
+  const captured = { listSheets: null, readRange: null };
+  const handlers = createM365ToolHandlers({
+    mail: {}, calendar: {}, drive: {},
+    excel: {
+      async listSheets(args) {
+        captured.listSheets = args;
+        return { sheets: [] };
+      },
+      async readRange(args) {
+        captured.readRange = args;
+        return { address: 'Sheet1!A1:A1', values: [['x']] };
+      },
+    },
+    graph: {}, tooling: {}
+  });
+  await handlers['excel.workbook.listSheets']({ driveItemId: 'drive-1', workbookSession: 'default' });
+  await handlers['excel.workbook.readRange']({ driveItemId: 'drive-1', workbookSession: 'session', sheetName: 'Sheet1' });
+  assert.equal(captured.listSheets.workbookSession, undefined);
+  assert.equal(captured.readRange.workbookSession, undefined);
+});
+
+test('excel workbook handlers drop short workbook sessions', async () => {
+  const createM365ToolHandlers = loadFactory();
+  const captured = { listSheets: null, readRange: null };
+  const handlers = createM365ToolHandlers({
+    mail: {}, calendar: {}, drive: {},
+    excel: {
+      async listSheets(args) {
+        captured.listSheets = args;
+        return { sheets: [] };
+      },
+      async readRange(args) {
+        captured.readRange = args;
+        return { address: 'Sheet1!A1:A1', values: [['x']] };
+      },
+    },
+    graph: {}, tooling: {}
+  });
+  await handlers['excel.workbook.listSheets']({ driveItemId: 'drive-1', workbookSession: 'initial' });
+  await handlers['excel.workbook.readRange']({ driveItemId: 'drive-1', workbookSession: 'initial', sheetName: 'Sheet1', range: 'A1:A1' });
+  assert.equal(captured.listSheets.workbookSession, undefined);
+  assert.equal(captured.readRange.workbookSession, undefined);
+});
+
+test('excel.workbook.readRange normalises column-only ranges to reasonable defaults', async () => {
+  const createM365ToolHandlers = loadFactory();
+  const captured = [];
+  const handlers = createM365ToolHandlers({
+    mail: {}, calendar: {}, drive: {},
+    excel: {
+      async readRange(args) {
+        captured.push(args);
+        return { address: 'Sheet1!A1:B10', values: [['x']] };
+      },
+    },
+    graph: {}, tooling: {}
+  });
+  await handlers['excel.workbook.readRange']({
+    driveItemId: 'drive-1',
+    sheetName: 'Sheet1',
+    range: 'A:Z',
+    valuesOnly: false,
+  });
+  await handlers['excel.workbook.readRange']({
+    driveItemId: 'drive-1',
+    range: 'A:Z',
+  });
+  const [sheetCall, workbookCall] = captured;
+  assert.equal(sheetCall.range, undefined);
+  assert.equal(sheetCall.valuesOnly, true);
+  assert.equal(workbookCall.range, 'A1:Z200');
+});
+
+test('excel.workbook.readRange interprets "usedRange" inputs correctly', async () => {
+  const createM365ToolHandlers = loadFactory();
+  let received;
+  const handlers = createM365ToolHandlers({
+    mail: {}, calendar: {}, drive: {},
+    excel: {
+      async readRange(args) {
+        received = args;
+        return { address: 'Sheet1!A1:B2', values: [['ok']] };
+      },
+    },
+    graph: {}, tooling: {}
+  });
+  await handlers['excel.workbook.readRange']({
+    driveItemId: 'drive-1',
+    sheetName: 'Sheet1',
+    range: 'usedRange',
+    valuesOnly: false,
+  });
+  assert.equal(received.range, undefined);
+  assert.equal(received.valuesOnly, true);
 });
 
 test('graph.health.check bubbles dependency output', async () => {

@@ -738,7 +738,7 @@ async function runAgentStreaming({ prompt, threadId, res }) {
         '  • Antworten/Weiterleiten erfolgen über "mail.message.replyDraft" bzw. "mail.message.send".',
         '  • Anhänge bearbeitest du mit "mail.attachment.download" oder "mail.attachment.uploadAndAttach".',
         '  • Termine verwaltest du mit den "calendar.*"-Tools.',
-        '  • Excel-Daten liest/schreibst du via "excel.workbook.*" (Sheet-Namen und Session-ID immer angeben).',
+        '  • Excel-Daten liest/schreibst du via "excel.workbook.*" (Sheet-Namen angeben; Session-ID nur nutzen, wenn Graph sie explizit liefert).',
         '  • Prüfe Verfügbarkeit/Token per "graph.health.check" oder "graph.token.acquire" bei Fehlern.',
         '- Datenbankaufgaben (PostgreSQL):',
         '  • Schema- und Objektübersicht über "postgres_list_schemas" / "postgres_list_objects".',

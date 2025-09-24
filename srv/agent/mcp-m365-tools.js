@@ -28,6 +28,52 @@ function createM365ToolHandlers(dependencies = {}) {
   const graphDeps = dependencies.graph || {};
   const toolingDeps = dependencies.tooling || {};
 
+  const PLACEHOLDER_SESSIONS = new Set(['default', 'session', 'persistent', 'initial', 'shared']);
+  const COLUMN_RANGE_PATTERN = /^[a-z]+:[a-z]+$/i;
+  const COLUMN_ONLY_FALLBACK_ROWS = 200;
+
+  function normaliseWorkbookSession(value) {
+    if (!value) return undefined;
+    const candidate = typeof value === 'string' ? value : (value && value.id ? String(value.id) : String(value));
+    const trimmed = candidate.trim();
+    if (!trimmed) return undefined;
+    const lowered = trimmed.toLowerCase();
+    if (PLACEHOLDER_SESSIONS.has(lowered)) return undefined;
+    if (/^session-?\d+$/i.test(trimmed)) return undefined;
+    if (trimmed.length <= 8) return undefined;
+    if (trimmed.length < 20) return undefined;
+    return trimmed;
+  }
+
+  function normaliseRangeArguments({ sheetName, range, valuesOnly }) {
+    if (range == null) {
+      return { range: undefined, valuesOnly };
+    }
+    if (typeof range !== 'string') {
+      return { range, valuesOnly };
+    }
+    const trimmed = range.trim();
+    if (!trimmed) {
+      return { range: undefined, valuesOnly };
+    }
+    if (/^usedrange$/i.test(trimmed)) {
+      return { range: undefined, valuesOnly: true };
+    }
+    if (COLUMN_RANGE_PATTERN.test(trimmed.replace(/\s+/g, ''))) {
+      const [rawStart, rawEnd] = trimmed.split(':');
+      const startCol = rawStart.replace(/[^a-z]/gi, '').toUpperCase();
+      const endCol = rawEnd.replace(/[^a-z]/gi, '').toUpperCase() || startCol;
+      if (sheetName) {
+        return { range: undefined, valuesOnly: true };
+      }
+      const safeStart = startCol || 'A';
+      const safeEnd = endCol || safeStart;
+      const boundedRange = `${safeStart}1:${safeEnd}${COLUMN_ONLY_FALLBACK_ROWS}`;
+      return { range: boundedRange, valuesOnly };
+    }
+    return { range: trimmed, valuesOnly };
+  }
+
   handlers['mail.latestMessage.get'] = async ({ folderId = 'inbox', select, includeBodyPreview = false } = {}) => {
     assertFunction(mailDeps.getLatestMessage, 'mail.getLatestMessage dependency missing');
     const result = await mailDeps.getLatestMessage({ folderId, select, includeBodyPreview });
@@ -163,9 +209,9 @@ function createM365ToolHandlers(dependencies = {}) {
 
   handlers['excel.workbook.listSheets'] = async ({ driveItemId, workbookSession } = {}) => {
     if (!driveItemId) throw new Error('driveItemId is required');
-    if (!workbookSession) throw new Error('workbookSession is required');
     assertFunction(excelDeps.listSheets, 'excel.listSheets dependency missing');
-    const result = await excelDeps.listSheets({ driveItemId, workbookSession });
+    const session = normaliseWorkbookSession(workbookSession);
+    const result = await excelDeps.listSheets({ driveItemId, workbookSession: session });
     return { sheets: (result && result.sheets) || result || [] };
   };
 
@@ -178,9 +224,17 @@ function createM365ToolHandlers(dependencies = {}) {
     preferValues = false,
   } = {}) => {
     if (!driveItemId) throw new Error('driveItemId is required');
-    if (!workbookSession) throw new Error('workbookSession is required');
     assertFunction(excelDeps.readRange, 'excel.readRange dependency missing');
-    const result = await excelDeps.readRange({ driveItemId, workbookSession, sheetName, range, valuesOnly, preferValues });
+    const session = normaliseWorkbookSession(workbookSession);
+    const normalisedRange = normaliseRangeArguments({ sheetName, range, valuesOnly });
+    const result = await excelDeps.readRange({
+      driveItemId,
+      workbookSession: session,
+      sheetName,
+      range: normalisedRange.range,
+      valuesOnly: normalisedRange.valuesOnly,
+      preferValues,
+    });
     if (!result) return { address: undefined, values: [] };
     return {
       address: result.address,
@@ -197,12 +251,12 @@ function createM365ToolHandlers(dependencies = {}) {
     matchExpected,
   } = {}) => {
     if (!driveItemId) throw new Error('driveItemId is required');
-    if (!workbookSession) throw new Error('workbookSession is required');
     if (!sheetName) throw new Error('sheetName is required');
     if (!range) throw new Error('range is required');
     if (!Array.isArray(values)) throw new Error('values must be an array of rows');
     assertFunction(excelDeps.updateRange, 'excel.updateRange dependency missing');
-    const result = await excelDeps.updateRange({ driveItemId, workbookSession, sheetName, range, values, matchExpected });
+    const session = normaliseWorkbookSession(workbookSession);
+    const result = await excelDeps.updateRange({ driveItemId, workbookSession: session, sheetName, range, values, matchExpected });
     return {
       status: 'updated',
       modifiedRange: result && result.modifiedRange ? result.modifiedRange : range,

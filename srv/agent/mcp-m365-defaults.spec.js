@@ -99,21 +99,98 @@ test('mail.message.replyDraft issues create, patch and send requests', async () 
   assert.equal(calls[2].options.method, 'POST');
 });
 
-test('excel.workbook.readRange uses workbook session header', async () => {
+test('excel.workbook.readRange uses workbook session header when provided', async () => {
   const { fetchImpl, calls } = createFetchStub([
-    () => createResponse({ sheets: [{ name: 'Sheet1' }] }),
+    () => createResponse({ value: [{ name: 'Sheet1' }] }),
     () => createResponse({ address: 'Sheet1!A1:B2', values: [["A", "B"], ["C", "D"]] }),
   ]);
   const deps = await createDefaultM365Dependencies({ fetchImpl, accessToken: 'token-789', fs: createFsStub() });
   const handlers = createM365ToolHandlers(deps);
-  await handlers['excel.workbook.listSheets']({ driveItemId: 'drive-1', workbookSession: 'session-1' });
+  const validSession = '12345678-1234-1234-1234-1234567890ab';
+  await handlers['excel.workbook.listSheets']({ driveItemId: 'drive-1', workbookSession: validSession });
   const result = await handlers['excel.workbook.readRange']({
     driveItemId: 'drive-1',
-    workbookSession: 'session-1',
+    workbookSession: validSession,
     sheetName: 'Sheet1',
   });
   assert.equal(result.address, 'Sheet1!A1:B2');
-  assert.equal(calls[1].options.headers['workbook-session-id'], 'session-1');
+  assert.equal(calls[0].options.headers['workbook-session-id'], validSession);
+  assert.equal(calls[1].options.headers['workbook-session-id'], validSession);
+});
+
+test('excel.workbook.readRange omits workbook session header when absent', async () => {
+  const { fetchImpl, calls } = createFetchStub([
+    () => createResponse({ address: 'Sheet1!A1:B2', values: [["A", "B"], ["C", "D"]] }),
+  ]);
+  const deps = await createDefaultM365Dependencies({ fetchImpl, accessToken: 'token-ops', fs: createFsStub() });
+  const handlers = createM365ToolHandlers(deps);
+  await handlers['excel.workbook.readRange']({
+    driveItemId: 'drive-ops',
+    sheetName: 'Sheet1',
+  });
+  assert.equal(calls[0].options.headers['workbook-session-id'], undefined);
+});
+
+test('excel.workbook.readRange strips short workbook sessions before calling Graph', async () => {
+  const { fetchImpl, calls } = createFetchStub([
+    () => createResponse({ address: 'Sheet1!A1:B2', values: [["A", "B"]] }),
+  ]);
+  const deps = await createDefaultM365Dependencies({ fetchImpl, accessToken: 'token-short', fs: createFsStub() });
+  const handlers = createM365ToolHandlers(deps);
+  await handlers['excel.workbook.readRange']({
+    driveItemId: 'drive-short',
+    workbookSession: 'initial',
+    sheetName: 'Sheet1',
+  });
+  assert.equal(calls[0].options.headers['workbook-session-id'], undefined);
+});
+
+test('excel.workbook.listSheets falls back when session rejected', async () => {
+  const { fetchImpl, calls } = createFetchStub([
+    () => createResponse({
+      error: {
+        code: 'ApiInvalidArgument',
+        message: 'Ungültiger Wert für Argument: Workbook-Session-Id.'
+      }
+    }, 400),
+    () => createResponse({ value: [{ name: 'SheetA' }] }),
+  ]);
+  const deps = await createDefaultM365Dependencies({ fetchImpl, accessToken: 'token-fallback', fs: createFsStub() });
+  const handlers = createM365ToolHandlers(deps);
+  const result = await handlers['excel.workbook.listSheets']({
+    driveItemId: 'drive-2',
+    workbookSession: 'bad-session-guid-1234567890abcd'
+  });
+  assert.deepEqual(result, { sheets: ['SheetA'] });
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].options.headers['workbook-session-id'], 'bad-session-guid-1234567890abcd');
+  assert.equal(calls[1].options.headers && calls[1].options.headers['workbook-session-id'], undefined);
+});
+
+test('excel.workbook.readRange falls back when session rejected', async () => {
+  const { fetchImpl, calls } = createFetchStub([
+    () => createResponse({
+      error: {
+        code: 'ApiInvalidArgument',
+        message: 'Ungültiger Wert für Argument: Workbook-Session-Id.'
+      }
+    }, 400),
+    () => createResponse({ address: 'Sheet1!A1:A1', values: [['ok']] }),
+  ]);
+  const deps = await createDefaultM365Dependencies({ fetchImpl, accessToken: 'token-range', fs: createFsStub() });
+  const handlers = createM365ToolHandlers(deps);
+  const result = await handlers['excel.workbook.readRange']({
+    driveItemId: 'drive-3',
+    workbookSession: '12345678-1234-1234-1234-1234567890ab',
+    sheetName: 'Sheet1',
+    range: 'A1:A1',
+    preferValues: true,
+  });
+  assert.deepEqual(result, { address: 'Sheet1!A1:A1', values: [['ok']] });
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].options.headers['workbook-session-id'], '12345678-1234-1234-1234-1234567890ab');
+  assert.equal(calls[1].options.headers['workbook-session-id'], undefined);
+  assert.equal(calls[1].options.headers.Prefer, 'outlook.body-content-type="text"');
 });
 
 test('graph.health.check returns health metadata', async () => {

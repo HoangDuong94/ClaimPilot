@@ -389,7 +389,6 @@ async function createDefaultM365Dependencies(options = {}) {
       const encodedPath = drivePath.startsWith('/') ? drivePath : `/${drivePath}`;
       const response = await graphFetch(`/me/drive/root:${encodedPath}:/content`, {
         method: 'PUT',
-        headers: { 'If-Match': '*' },
         query: {
           '@microsoft.graph.conflictBehavior': conflictBehavior,
         },
@@ -400,25 +399,54 @@ async function createDefaultM365Dependencies(options = {}) {
     },
   };
 
+  const PLACEHOLDER_WORKBOOK_SESSIONS = new Set(['default', 'session', 'persistent', 'initial', 'shared']);
+
+  function sanitiseWorkbookSession(session) {
+    if (!session) return undefined;
+    const candidate = typeof session === 'string' ? session : (session && session.id ? String(session.id) : String(session));
+    const trimmed = candidate.trim();
+    if (!trimmed) return undefined;
+    const lowered = trimmed.toLowerCase();
+    if (PLACEHOLDER_WORKBOOK_SESSIONS.has(lowered)) return undefined;
+    if (/^session-?\d+$/i.test(trimmed)) return undefined;
+    if (trimmed.length <= 8) return undefined;
+    if (trimmed.length < 20) return undefined;
+    return trimmed;
+  }
+
   function workbookHeaders(session) {
     return session ? { 'workbook-session-id': session } : {};
+  }
+
+  function isInvalidSessionError(error) {
+    if (!error) return false;
+    const message = typeof error.message === 'string' ? error.message : String(error);
+    return message.includes('Workbook-Session-Id') || message.toLowerCase().includes('workbook-session-id');
   }
 
   const excel = {
     async listSheets({ driveItemId, workbookSession } = {}) {
       if (!driveItemId) throw new Error('driveItemId is required');
-      if (!workbookSession) throw new Error('workbookSession is required');
-      const data = await graphFetch(`/me/drive/items/${driveItemId}/workbook/worksheets`, {
-        headers: workbookHeaders(workbookSession),
-      });
+      const session = sanitiseWorkbookSession(workbookSession);
+      const headers = workbookHeaders(session);
+      let data;
+      try {
+        data = await graphFetch(`/me/drive/items/${driveItemId}/workbook/worksheets`, { headers });
+      } catch (err) {
+        if (session && isInvalidSessionError(err)) {
+          data = await graphFetch(`/me/drive/items/${driveItemId}/workbook/worksheets`, { headers: {} });
+        } else {
+          throw err;
+        }
+      }
       const sheets = (data.value || []).map((item) => item.name);
       return { sheets };
     },
 
     async readRange({ driveItemId, workbookSession, sheetName, range, valuesOnly = true, preferValues = false } = {}) {
       if (!driveItemId) throw new Error('driveItemId is required');
-      if (!workbookSession) throw new Error('workbookSession is required');
-      const headers = workbookHeaders(workbookSession);
+      const session = sanitiseWorkbookSession(workbookSession);
+      const headers = workbookHeaders(session);
       if (preferValues) headers.Prefer = 'outlook.body-content-type="text"';
       let endpoint;
       if (sheetName && range) {
@@ -428,24 +456,48 @@ async function createDefaultM365Dependencies(options = {}) {
       } else {
         endpoint = `/me/drive/items/${driveItemId}/workbook/usedRange(valuesOnly=${valuesOnly ? 'true' : 'false'})`;
       }
-      const data = await graphFetch(endpoint, { headers });
+      let data;
+      try {
+        data = await graphFetch(endpoint, { headers });
+      } catch (err) {
+        if (session && isInvalidSessionError(err)) {
+          const fallbackHeaders = {};
+          if (preferValues) fallbackHeaders.Prefer = 'outlook.body-content-type="text"';
+          data = await graphFetch(endpoint, { headers: fallbackHeaders });
+        } else {
+          throw err;
+        }
+      }
       return { address: data.address, values: data.values || [] };
     },
 
     async updateRange({ driveItemId, workbookSession, sheetName, range, values, matchExpected } = {}) {
       if (!driveItemId) throw new Error('driveItemId is required');
-      if (!workbookSession) throw new Error('workbookSession is required');
       if (!sheetName) throw new Error('sheetName is required');
       if (!range) throw new Error('range is required');
       if (!Array.isArray(values)) throw new Error('values must be an array');
-      const headers = workbookHeaders(workbookSession);
+      const session = sanitiseWorkbookSession(workbookSession);
+      const headers = workbookHeaders(session);
       if (matchExpected) headers['If-Match'] = '*';
       const endpoint = `/me/drive/items/${driveItemId}/workbook/worksheets('${sheetName}')/range(address='${range}')`;
-      await graphFetch(endpoint, {
-        method: 'PATCH',
-        headers,
-        body: { values },
-      });
+      try {
+        await graphFetch(endpoint, {
+          method: 'PATCH',
+          headers,
+          body: { values },
+        });
+      } catch (err) {
+        if (session && isInvalidSessionError(err)) {
+          const fallbackHeaders = matchExpected ? { 'If-Match': '*' } : {};
+          await graphFetch(endpoint, {
+            method: 'PATCH',
+            headers: fallbackHeaders,
+            body: { values },
+          });
+        } else {
+          throw err;
+        }
+      }
       return { modifiedRange: `${sheetName}!${range}` };
     },
   };

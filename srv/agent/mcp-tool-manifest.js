@@ -346,10 +346,10 @@ const toolDefinitions = [
     description: 'Listet Arbeitsblattnamen in einem Workbook über die Graph Excel API.',
     inputSchema: {
       type: 'object',
-      required: ['driveItemId', 'workbookSession'],
+      required: ['driveItemId'],
       properties: {
         driveItemId: { type: 'string' },
-        workbookSession: { type: 'string', description: 'Graph Workbook Session ID für deterministische Zugriffe.' }
+        workbookSession: { type: 'string', description: 'Optional: Graph Workbook Session ID für deterministische Zugriffe.' }
       }
     },
     outputSchema: {
@@ -370,10 +370,10 @@ const toolDefinitions = [
     description: 'Liest deterministisch Werte aus einem Workbook-Bereich, optional über usedRange.',
     inputSchema: {
       type: 'object',
-      required: ['driveItemId', 'workbookSession'],
+      required: ['driveItemId'],
       properties: {
         driveItemId: { type: 'string' },
-        workbookSession: { type: 'string', description: 'Workbook Session für konsistente Ergebnisse.' },
+        workbookSession: { type: 'string', description: 'Optional: Workbook Session für konsistente Ergebnisse.' },
         sheetName: { type: 'string', description: 'Name des Arbeitsblatts.' },
         range: { type: 'string', description: 'Optionaler Bereich, z. B. A1:D20.' },
         valuesOnly: { type: 'boolean', default: true, description: 'Gibt nur Werte zurück (wie usedRange(valuesOnly=true)).' },
@@ -399,10 +399,10 @@ const toolDefinitions = [
     description: 'Schreibt Werte in einen definierten Workbook-Bereich mit optionalem Wertevergleich.',
     inputSchema: {
       type: 'object',
-      required: ['driveItemId', 'workbookSession', 'sheetName', 'range', 'values'],
+      required: ['driveItemId', 'sheetName', 'range', 'values'],
       properties: {
         driveItemId: { type: 'string' },
-        workbookSession: { type: 'string' },
+        workbookSession: { type: 'string', description: 'Optional: Workbook Session für konsistente Ergebnisse.' },
         sheetName: { type: 'string' },
         range: { type: 'string' },
         values: {

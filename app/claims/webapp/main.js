@@ -234,6 +234,8 @@ sap.ui.define([
         lastStreamHtml: '',
         suggestions: [
           { text: "Zeige mir die neueste Mail aus dem Posteingang." },
+          { text: "Ist dort ein Anhang vorhanden?" },
+          { text: "Kannst du den Excel Anhang auslesen?" },
           { text: "Antworte auf die letzte Mail und bitte um fehlende Dokumente." },
           { text: "Welche Termine stehen diese Woche im Kalender?" },
           { text: "Lies die Tabelle 'Stammtisch Planung' aus der Excel im OneDrive." }

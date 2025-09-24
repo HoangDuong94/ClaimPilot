@@ -1,0 +1,3940 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+agent/bootstrap/http-trace.js
+agent/helpers/logging.js
+agent/index.js
+agent/mcp-clients.js
+agent/mcp-clients.spec.js
+agent/mcp-jsonschema.js
+agent/mcp-jsonschema.spec.js
+agent/mcp-m365-defaults.js
+agent/mcp-m365-defaults.spec.js
+agent/mcp-m365-inprocess.js
+agent/mcp-m365-tools.js
+agent/mcp-m365-tools.spec.js
+agent/mcp-tool-manifest.js
+agent/mcp-tool-manifest.spec.js
+agent/mcp-tool-registry.js
+agent/mcp-tool-registry.spec.js
+chat-provider.js
+claim-flat.cds
+fe-annotations.cds
+server.js
+service.cds
+service.js
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="agent/bootstrap/http-trace.js">
+// Optional HTTP tracing for global fetch
+// Enable with AGENT_HTTP_TRACE=1 or =true
+
+const { redact, safeJson } = require('../helpers/logging');
+
+function enableHttpTrace() {
+  try {
+    const on = process.env.AGENT_HTTP_TRACE === '1' || process.env.AGENT_HTTP_TRACE === 'true';
+    if (!on) return;
+    if (!globalThis.fetch) return; // Node <18 or no fetch polyfill
+    if (globalThis.__agent_http_trace_enabled) return;
+    globalThis.__agent_http_trace_enabled = true;
+
+    const orig = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input?.url;
+      try {
+        console.log('[HTTP][req]', {
+          method: init?.method || 'GET',
+          url,
+          headers: redact(init?.headers),
+          bodyPreview: safeJson(init?.body, 1000),
+        });
+      } catch {}
+      const res = await orig(input, init);
+      try {
+        const clone = res.clone?.() || res; // some fetch impl may not support clone
+        let body = '';
+        try { body = await clone.text(); } catch {}
+        const headersObj = {};
+        try {
+          if (res.headers && typeof res.headers.entries === 'function') {
+            for (const [k, v] of res.headers.entries()) headersObj[k] = v;
+          }
+        } catch {}
+        console.log('[HTTP][res]', {
+          status: res.status,
+          url: res.url,
+          headers: headersObj,
+          bodyPreview: body && body.length > 1000 ? body.slice(0, 1000) + ' …[truncated]' : body
+        });
+      } catch {}
+      return res;
+    };
+  } catch {}
+}
+
+module.exports = { enableHttpTrace };
+</file>
+
+<file path="agent/helpers/logging.js">
+// Logging helpers: redact sensitive info, safe JSON stringify, and unwrap nested errors
+
+function redact(obj) {
+  try {
+    const clone = JSON.parse(JSON.stringify(obj || {}));
+    const headers = clone?.headers || clone?.response?.headers;
+    const findHeader = (k) => headers && Object.keys(headers).find((h) => String(h).toLowerCase() === k);
+    const authKey = findHeader('authorization');
+    if (authKey) headers[authKey] = '***';
+    const cookieKey = findHeader('cookie');
+    if (cookieKey) headers[cookieKey] = '***';
+    if (clone?.access_token) clone.access_token = '***';
+    if (clone?.token) clone.token = '***';
+    if (clone?.apiKey) clone.apiKey = '***';
+    return clone;
+  } catch {
+    return undefined;
+  }
+}
+
+function safeJson(x, max = 4000) {
+  try {
+    const s = typeof x === 'string' ? x : JSON.stringify(x);
+    return s.length > max ? s.slice(0, max) + ' …[truncated]' : s;
+  } catch {
+    try { return String(x); } catch { return '[unprintable]'; }
+  }
+}
+
+function unwrapError(err, maxDepth = 5) {
+  const chain = [];
+  let cur = err;
+  let depth = 0;
+  while (cur && depth < maxDepth) {
+    chain.push({
+      name: cur?.name,
+      message: cur?.message,
+      code: cur?.code ?? cur?.status ?? cur?.statusCode,
+      responseStatus: cur?.response?.status ?? cur?.response?.statusCode,
+      responseData: cur?.response?.data ?? cur?.response?.body,
+      responseHeaders: redact(cur?.response?.headers),
+      url: cur?.config?.url ?? cur?.options?.url,
+      method: cur?.config?.method ?? cur?.options?.method,
+      params: cur?.config?.params,
+      requestData: cur?.config?.data,
+    });
+    cur = cur?.cause;
+    depth += 1;
+  }
+  return chain;
+}
+
+module.exports = { redact, safeJson, unwrapError };
+</file>
+
+<file path="agent/index.js">
+// New Agent implementation: LangGraph React-Agent + MCP tools (M365 only)
+// CommonJS with dynamic imports for ESM-only packages
+
+// Lightweight helpers for safe logging and output shaping
+const crypto = require('crypto');
+const { createChatProvider } = require('../chat-provider');
+function hash(s = '') {
+  try { return crypto.createHash('sha1').update(String(s)).digest('hex').slice(0, 10); } catch (_) { return 'nohash'; }
+}
+function cap(str, n = 4000) {
+  const s = String(str || '');
+  return s.length > n ? s.slice(0, n) + ' ...[truncated]' : s;
+}
+
+function extractMcpText(result) {
+  if (!result) return '';
+  if (typeof result === 'string') return result;
+
+  if (result.structuredContent !== undefined) {
+    const sc = result.structuredContent;
+    if (typeof sc === 'string') return sc;
+    try { return JSON.stringify(sc); } catch (_) { return String(sc); }
+  }
+
+  if (Array.isArray(result.content)) {
+    const parts = [];
+    for (const block of result.content) {
+      if (!block) continue;
+      if (typeof block === 'string') {
+        parts.push(block);
+        continue;
+      }
+      const type = block.type;
+      if (type === 'text' && typeof block.text === 'string') {
+        parts.push(block.text);
+        continue;
+      }
+      if (type === 'json' && block.json !== undefined) {
+        try { parts.push(typeof block.json === 'string' ? block.json : JSON.stringify(block.json)); }
+        catch (_) { parts.push(String(block.json)); }
+        continue;
+      }
+      if ((type === 'stdout' || type === 'stderr' || type === 'cli_output') && typeof block.text === 'string') {
+        parts.push(block.text);
+        continue;
+      }
+      if ((type === 'output' || type === 'comment') && typeof block.text === 'string') {
+        parts.push(block.text);
+      }
+    }
+    if (parts.length) return parts.join('\n');
+  }
+
+  if (typeof result.text === 'string') return result.text;
+  if (typeof result.output === 'string') return result.output;
+  if (Array.isArray(result.output)) {
+    try { return result.output.join('\n'); } catch (_) {}
+  }
+  if (typeof result.stdout === 'string') return result.stdout;
+
+  try { return JSON.stringify(result); } catch (_) { return String(result); }
+}
+
+// Policy: rewrite unsafe/unbounded commands to safe variants
+function rewriteCommandSafely(cmd) {
+  return String(cmd || '');
+}
+
+// Output reducer for known commands; keeps responses compact for the LLM/history
+function reduceOutput(cmd, raw) {
+  try { return typeof raw === 'string' ? raw : JSON.stringify(raw); }
+  catch (_) { return String(raw); }
+}
+
+function flattenPossibleText(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    const parts = [];
+    for (const entry of value) {
+      const text = flattenPossibleText(entry);
+      if (text) parts.push(text);
+    }
+    return parts.join('');
+  }
+  if (typeof value === 'object') {
+    if (typeof value.text === 'string') return value.text;
+    if (typeof value.output_text === 'string') return value.output_text;
+    if (typeof value.value === 'string') return value.value;
+    if (typeof value.content === 'string') return value.content;
+    if (Array.isArray(value.content)) {
+      const nested = flattenPossibleText(value.content);
+      if (nested) return nested;
+    }
+  }
+  return '';
+}
+
+function extractMessageText(message) {
+  if (!message) return '';
+  return flattenPossibleText(message.content ?? message);
+}
+
+function extractReturnValuesText(payload) {
+  if (!payload || typeof payload === 'number' || typeof payload === 'boolean') return '';
+  if (typeof payload === 'string') return payload;
+  if (Array.isArray(payload)) return flattenPossibleText(payload);
+  if (typeof payload === 'object') {
+    const keys = ['output_text', 'output', 'response', 'content', 'text', 'value', 'final', 'message'];
+    for (const key of keys) {
+      if (payload[key] !== undefined) {
+        const text = flattenPossibleText(payload[key]);
+        if (text) return text;
+      }
+    }
+    if (Array.isArray(payload.messages) && payload.messages.length) {
+      const last = payload.messages[payload.messages.length - 1];
+      const text = extractMessageText(last);
+      if (text) return text;
+    }
+  }
+  return '';
+}
+
+function extractFinalChunkText(chunk) {
+  if (!chunk || typeof chunk !== 'object') return '';
+  const direct = extractReturnValuesText(chunk.returnValues)
+    || extractReturnValuesText(chunk.final)
+    || extractReturnValuesText(chunk.finalOutput)
+    || extractReturnValuesText(chunk.data);
+  if (direct) return direct;
+  if (chunk.output !== undefined) {
+    const text = extractReturnValuesText(chunk.output);
+    if (text) return text;
+  }
+  if (chunk.agentOutcome && typeof chunk.agentOutcome === 'object') {
+    const text = extractReturnValuesText(chunk.agentOutcome.returnValues || chunk.agentOutcome.output);
+    if (text) return text;
+  }
+  return '';
+}
+
+function normaliseDateTimeInput(value) {
+  if (!value) return { iso: '', tz: '' };
+  if (typeof value === 'string') {
+    return { iso: value, tz: value.endsWith('Z') ? 'UTC' : '' };
+  }
+  if (typeof value === 'object') {
+    const iso = value.dateTime || value.date || value.iso || '';
+    const tz = value.timeZone || value.tz || '';
+    return { iso, tz };
+  }
+  return { iso: String(value), tz: '' };
+}
+
+function splitIsoToParts(iso) {
+  const str = String(iso || '');
+  const result = { iso: str, date: '', time: '' };
+  if (!str) return result;
+  const trimmed = str.replace(/\.(\d+)(Z)?$/, '$2');
+  const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}))/);
+  if (match) {
+    result.date = match[1];
+    result.time = match[2] || '';
+  }
+  return result;
+}
+
+function buildIsoSegment(parts) {
+  if (!parts) return '';
+  if (parts.date) {
+    return parts.time ? `${parts.date} ${parts.time}` : parts.date;
+  }
+  return parts.iso || '';
+}
+
+function formatDateRangeForSummary(startInput, endInput) {
+  const start = normaliseDateTimeInput(startInput);
+  const end = normaliseDateTimeInput(endInput);
+  const startParts = splitIsoToParts(start.iso);
+  const endParts = splitIsoToParts(end.iso);
+  const startSegment = buildIsoSegment(startParts);
+  const endSegment = buildIsoSegment(endParts);
+  let range = '';
+  if (startSegment && endSegment) {
+    if (startParts.date && endParts.date && startParts.date === endParts.date) {
+      if (startParts.time && endParts.time) {
+        range = `${startParts.date} ${startParts.time}–${endParts.time}`;
+      } else {
+        range = startSegment;
+      }
+    } else {
+      range = `${startSegment} → ${endSegment}`;
+    }
+  } else {
+    range = startSegment || endSegment;
+  }
+  const tzFallback = (start.iso && start.iso.endsWith('Z') && end.iso && end.iso.endsWith('Z')) ? 'UTC' : '';
+  const tz = start.tz || end.tz || tzFallback;
+  return range && tz ? `${range} (${tz})` : range;
+}
+
+function summariseToolResult({ toolName, toolMessage, toolArgs, rawText }) {
+  let payload;
+  if (toolMessage && typeof toolMessage === 'object') {
+    const extra = toolMessage.additional_kwargs;
+    if (extra && typeof extra === 'object') {
+      if (extra.output !== undefined) payload = extra.output;
+      else if (extra.data !== undefined) payload = extra.data;
+      else if (extra.content !== undefined) payload = extra.content;
+    }
+    if (payload === undefined && toolMessage.output !== undefined) payload = toolMessage.output;
+    if (payload === undefined && toolMessage.result !== undefined) payload = toolMessage.result;
+    if (payload === undefined && typeof toolMessage.content === 'object' && !Array.isArray(toolMessage.content)) {
+      payload = toolMessage.content;
+    }
+  }
+  if (payload === undefined && typeof rawText === 'string') {
+    const trimmed = rawText.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try { payload = JSON.parse(trimmed); }
+      catch (_) { payload = undefined; }
+    }
+  }
+
+  if (toolName === 'calendar.event.createOrUpdate') {
+    let args = toolArgs;
+    if (typeof args === 'string') {
+      try { args = JSON.parse(args); }
+      catch (_) { args = {}; }
+    }
+    const subject = typeof args?.subject === 'string' && args.subject.trim() ? args.subject.trim() : 'Termin';
+    const range = formatDateRangeForSummary(args?.start, args?.end);
+    const status = typeof payload?.status === 'string'
+      ? payload.status
+      : (args && args.eventId ? 'updated' : 'created');
+    const eventId = payload && typeof payload.eventId === 'string' ? payload.eventId : undefined;
+    const statusVerb = status === 'updated' ? 'aktualisiert' : 'erstellt';
+    let sentence = `Termin ${statusVerb}: '${subject}'`;
+    if (range) sentence += ` (${range})`;
+    if (eventId) sentence += ` [${eventId}]`;
+    return sentence;
+  }
+
+  if (payload && typeof payload === 'object') {
+    if (typeof payload.message === 'string' && payload.message.trim()) return payload.message.trim();
+    if (typeof payload.text === 'string' && payload.text.trim()) return payload.text.trim();
+    if (typeof payload.summary === 'string' && payload.summary.trim()) return payload.summary.trim();
+    if (typeof payload.output_text === 'string' && payload.output_text.trim()) return payload.output_text.trim();
+    if (typeof payload.status === 'string') {
+      const extraKeys = ['eventId', 'draftId', 'internetMessageId', 'attachmentId', 'driveItemId', 'filePath', 'feature'];
+      const extras = [];
+      for (const key of extraKeys) {
+        const val = payload[key];
+        if (val === undefined || val === null || val === '') continue;
+        extras.push(`${key}: ${val}`);
+      }
+      return extras.length ? `${payload.status}: ${extras.join(', ')}` : payload.status;
+    }
+  }
+
+  if (typeof rawText === 'string' && rawText.trim()) return rawText.trim();
+  if (payload !== undefined) {
+    try { return JSON.stringify(payload); }
+    catch (_) { }
+  }
+  return '';
+}
+
+let agentExecutor = null;
+let mcpClients = null;
+let agentInfo = { toolNames: [], modelName: '', provider: '' };
+const { unwrapError, safeJson } = require('./helpers/logging');
+const { enableHttpTrace } = require('./bootstrap/http-trace');
+const { createInProcessToolDefinitions } = require('./mcp-tool-registry');
+
+function sseWrite(res, data) {
+  if (data == null) return;
+  const s = String(data);
+  const lines = s.split(/\r?\n/);
+  let lastBlank = false;
+  for (const line of lines) {
+    const isBlank = line.length === 0;
+    if (isBlank && lastBlank) continue; // collapse multiple blank lines into one
+    res.write(`data: ${line}\n`);
+    lastBlank = isBlank;
+  }
+  res.write(`\n`);
+}
+// Emit smaller SSE chunks to improve incremental rendering in the UI
+function sseWriteChunked(res, text) {
+  const enable = process.env.AGENT_SSE_SPLIT !== '0';
+  const chunkSize = Math.max(16, Number(process.env.AGENT_SSE_CHUNK_SIZE || 80));
+  if (!enable) return sseWrite(res, text);
+  const str = String(text || '');
+  if (!str) return;
+  const lines = str.split(/\r?\n/);
+  for (const line of lines) {
+    if (line.length <= chunkSize) { sseWrite(res, line); continue; }
+    let i = 0;
+    const n = line.length;
+    while (i < n) {
+      const end = Math.min(i + chunkSize, n);
+      // try to break at a pleasant boundary within the window
+      const searchWindowEnd = Math.max(i + 1, end - 1);
+      const idxPeriod = line.lastIndexOf('.', searchWindowEnd);
+      const idxExclaim = line.lastIndexOf('!', searchWindowEnd);
+      const idxQuestion = line.lastIndexOf('?', searchWindowEnd);
+      const idxSpace = line.lastIndexOf(' ', searchWindowEnd);
+      let j = Math.max(idxPeriod, idxExclaim, idxQuestion);
+      if (j < i && idxSpace >= i + Math.floor(chunkSize / 2)) {
+        j = idxSpace;
+      }
+      if (j < i) {
+        j = end;
+      } else {
+        j = Math.min(j + 1, n); // include boundary character
+      }
+      const piece = line.slice(i, j).trimStart();
+      if (piece) sseWrite(res, piece);
+      i = j;
+    }
+    // send an explicit newline between long logical lines to help UI paragraphing
+    sseWrite(res, '');
+  }
+}
+function sseJson(res, obj) { sseWrite(res, JSON.stringify(obj)); }
+function sseEnd(res) { res.write('event: end\n'); res.write('data: [DONE]\n\n'); res.end(); }
+function sseError(res, obj) {
+  try {
+    res.write('event: error\n');
+    res.write(`data: ${JSON.stringify(obj)}\n\n`);
+  } catch (_) { }
+}
+function sseEvent(res, eventName, payload) {
+  if (!eventName) return;
+  try {
+    res.write(`event: ${eventName}\n`);
+    if (payload !== undefined) {
+      const text = typeof payload === 'string' ? payload : JSON.stringify(payload);
+      for (const line of String(text || '').split(/\r?\n/)) {
+        res.write(`data: ${line}\n`);
+      }
+    } else {
+      res.write('data:\n');
+    }
+    res.write('\n');
+  } catch (_) { }
+}
+function sseTrace(res, trace) {
+  if (!trace || !trace.length) return;
+  sseEvent(res, 'trace', trace);
+}
+
+async function initAgent() {
+  if (agentExecutor) return agentExecutor;
+
+  // Optional HTTP tracing for fetch
+  try { enableHttpTrace(); } catch (_) { }
+
+  const { initAllMCPClients } = require('./mcp-clients');
+  const { createReactAgent } = await import('@langchain/langgraph/prebuilt');
+  const { MemorySaver } = await import('@langchain/langgraph-checkpoint');
+  const { DynamicStructuredTool } = await import('@langchain/core/tools');
+  const { z } = await import('zod');
+
+  // 1) MCP Clients (only M365 for now)
+  mcpClients = await initAllMCPClients();
+  try {
+    console.log('[AGENT][mcp_clients]', { available: Object.keys(mcpClients || {}) });
+  } catch (_) { }
+
+  // 2) Guarded proxy for MCP tool(s); only expose whitelisted name(s)
+  const allTools = [];
+  const m365AllowRaw = process.env.MCP_M365_TOOLS || '';
+  const m365AllowList = m365AllowRaw.split(',').map((s) => s.trim()).filter(Boolean);
+  const allowAllM365 = m365AllowList.length === 0 || m365AllowList.includes('*') || m365AllowList.includes('all');
+  if (mcpClients.m365 && typeof mcpClients.m365.callTool === 'function') {
+    try {
+      const manifest = typeof mcpClients.m365.listTools === 'function'
+        ? await mcpClients.m365.listTools()
+        : null;
+      if (manifest && Array.isArray(manifest.tools) && manifest.tools.length) {
+        const defs = createInProcessToolDefinitions({
+          manifest,
+          callTool: async ({ name, args }) => mcpClients.m365.callTool({ name, arguments: args }),
+          z,
+        });
+        for (const def of defs) {
+          if (!allowAllM365 && !m365AllowList.includes(def.name)) continue;
+          const tool = new DynamicStructuredTool({
+            name: def.name,
+            description: def.description,
+            schema: def.zodSchema,
+            func: async (input) => {
+              const output = await def.invoke(input);
+              const text = typeof output === 'string' ? output : safeJson(output);
+              const slim = reduceOutput(def.name, text);
+              try {
+                console.log('[M365][tool]', {
+                  tool: def.name,
+                  rawBytes: text.length,
+                  slimBytes: slim.length,
+                  rawHash: hash(text),
+                });
+              } catch (_) { }
+              return output;
+            },
+            metadata: def.metadata,
+          });
+          allTools.push(tool);
+        }
+      }
+    } catch (err) {
+      try {
+        console.warn('[M365][tools]', 'Registrierung fehlgeschlagen', err?.message || String(err));
+      } catch (_) {}
+    }
+  }
+
+  if (mcpClients.postgres) {
+    const callPostgres = async (toolName, args) => {
+      const out = await mcpClients.postgres.callTool({ name: toolName, arguments: args });
+      let raw;
+      try {
+        const text = extractMcpText(out);
+        const fallback = typeof out === 'string' ? out : JSON.stringify(out);
+        raw = text && text.trim() ? text : fallback;
+      } catch (_) {
+        raw = String(out || '');
+      }
+      const slim = reduceOutput(toolName, raw);
+      try {
+        console.log('[PG][proxy]', { tool: toolName, rawBytes: raw.length, slimBytes: slim.length, rawHash: hash(raw) });
+      } catch (_) { }
+      return slim;
+    };
+
+    const allowedPostgres = (process.env.MCP_POSTGRES_TOOLS
+      || 'postgres_execute_sql,postgres_list_schemas,postgres_list_objects,postgres_get_object_details,postgres_explain_query,postgres_get_top_queries,postgres_analyze_db_health')
+      .split(',').map(s => s.trim()).filter(Boolean);
+    try { console.log('[AGENT][tools_whitelist]', { postgres: allowedPostgres }); } catch (_) {}
+
+    if (allowedPostgres.includes('postgres_execute_sql')) {
+      allTools.push(new DynamicStructuredTool({
+        name: 'postgres_execute_sql',
+        description: 'Führt SQL (CRUD) auf der ClaimPilot-Datenbank aus. Erwartet reines SQL, keine zusätzliche Kontextantwort.',
+        schema: z.object({ sql: z.string().min(1, 'SQL ist erforderlich') }),
+        func: async ({ sql }) => callPostgres('execute_sql', { sql }),
+      }));
+    }
+
+    if (allowedPostgres.includes('postgres_list_schemas')) {
+      allTools.push(new DynamicStructuredTool({
+        name: 'postgres_list_schemas',
+        description: 'Listet verfügbare Schemas im aktuellen PostgreSQL-Cluster.',
+        schema: z.object({}).optional(),
+        func: async () => callPostgres('list_schemas', {}),
+      }));
+    }
+
+    if (allowedPostgres.includes('postgres_list_objects')) {
+      allTools.push(new DynamicStructuredTool({
+        name: 'postgres_list_objects',
+        description: 'Listet Tabellen, Views, Sequenzen oder Erweiterungen in einem Schema.',
+        schema: z.object({
+          schema_name: z.string().min(1, 'Schema benötigt'),
+          object_type: z.enum(['table', 'view', 'sequence', 'extension']).default('table'),
+        }),
+        func: async ({ schema_name, object_type }) => callPostgres('list_objects', { schema_name, object_type }),
+      }));
+    }
+
+    if (allowedPostgres.includes('postgres_get_object_details')) {
+      allTools.push(new DynamicStructuredTool({
+        name: 'postgres_get_object_details',
+        description: 'Zeigt Spalten, Constraints und Indizes für Tabellen/Views sowie Details für Sequenzen oder Erweiterungen.',
+        schema: z.object({
+          schema_name: z.string().min(1, 'Schema benötigt'),
+          object_name: z.string().min(1, 'Objektname benötigt'),
+          object_type: z.enum(['table', 'view', 'sequence', 'extension']).default('table'),
+        }),
+        func: async ({ schema_name, object_name, object_type }) => callPostgres('get_object_details', { schema_name, object_name, object_type }),
+      }));
+    }
+
+    if (allowedPostgres.includes('postgres_explain_query')) {
+      allTools.push(new DynamicStructuredTool({
+        name: 'postgres_explain_query',
+        description: 'Erzeugt Explain-Plan für eine SQL-Abfrage. Optional mit ANALYZE oder hypothetischen Indizes.',
+        schema: z.object({
+          sql: z.string().min(1, 'SQL ist erforderlich'),
+          analyze: z.boolean().optional(),
+          hypothetical_indexes: z.array(z.object({
+            table: z.string(),
+            columns: z.array(z.string()).nonempty(),
+            using: z.string().optional(),
+          })).optional(),
+        }),
+        func: async ({ sql, analyze, hypothetical_indexes }) => callPostgres('explain_query', {
+          sql,
+          analyze: analyze ?? false,
+          hypothetical_indexes: hypothetical_indexes || [],
+        }),
+      }));
+    }
+
+    if (allowedPostgres.includes('postgres_get_top_queries')) {
+      allTools.push(new DynamicStructuredTool({
+        name: 'postgres_get_top_queries',
+        description: 'Zeigt auffällige SQLs basierend auf Ausführungszeit oder Ressourcenverbrauch.',
+        schema: z.object({
+          sort_by: z.enum(['resources', 'mean_time', 'total_time']).default('resources'),
+          limit: z.number().int().min(1).max(50).optional(),
+        }),
+        func: async ({ sort_by, limit }) => callPostgres('get_top_queries', {
+          sort_by: sort_by || 'resources',
+          limit: limit ?? 10,
+        }),
+      }));
+    }
+
+    if (allowedPostgres.includes('postgres_analyze_db_health')) {
+      allTools.push(new DynamicStructuredTool({
+        name: 'postgres_analyze_db_health',
+        description: 'Führt die integrierten Health-Checks (Index, Vacuum, Sequenzen usw.) aus.',
+        schema: z.object({
+          health_type: z.string().optional(),
+        }),
+        func: async ({ health_type }) => callPostgres('analyze_db_health', {
+          health_type: health_type || 'all',
+        }),
+      }));
+    }
+
+    if (allowedPostgres.includes('postgres_analyze_workload_indexes')) {
+      allTools.push(new DynamicStructuredTool({
+        name: 'postgres_analyze_workload_indexes',
+        description: 'Sucht Indexempfehlungen für das Gesamtsystem (nutzt pg_stat_statements).',
+        schema: z.object({
+          max_index_size_mb: z.number().int().min(1).optional(),
+          method: z.enum(['dta', 'llm']).optional(),
+        }),
+        func: async ({ max_index_size_mb, method }) => callPostgres('analyze_workload_indexes', {
+          max_index_size_mb: max_index_size_mb ?? 10000,
+          method: method || 'dta',
+        }),
+      }));
+    }
+
+    if (allowedPostgres.includes('postgres_analyze_query_indexes')) {
+      allTools.push(new DynamicStructuredTool({
+        name: 'postgres_analyze_query_indexes',
+        description: 'Analysiert benannte SQL-Statements und schlägt Indizes vor.',
+        schema: z.object({
+          queries: z.array(z.string().min(1)).min(1).max(10),
+          max_index_size_mb: z.number().int().min(1).optional(),
+          method: z.enum(['dta', 'llm']).optional(),
+        }),
+        func: async ({ queries, max_index_size_mb, method }) => callPostgres('analyze_query_indexes', {
+          queries,
+          max_index_size_mb: max_index_size_mb ?? 10000,
+          method: method || 'dta',
+        }),
+      }));
+    }
+  }
+
+  const toolNames = allTools.map(t => t?.name || 'unknown');
+  if (toolNames.length) {
+    try { console.log('[AGENT][tools_loaded]', { count: toolNames.length, names: toolNames }); } catch (_) { }
+  } else {
+    try { console.warn('[AGENT][tools_loaded]', { count: 0, reason: 'keine Tools konfiguriert' }); } catch (_) { }
+  }
+
+  // 3) LLM + in-memory checkpointing
+  const parsedTemp = Number(process.env.AI_TEMPERATURE);
+  const temperature = Number.isFinite(parsedTemp) ? parsedTemp : 1;
+  const parsedMaxTokens = Number(process.env.AGENT_MAX_COMPLETION_TOKENS ?? 500);
+  const maxCompletionTokens = Number.isFinite(parsedMaxTokens) ? parsedMaxTokens : 500;
+
+  const llmProvider = await createChatProvider({
+    temperature,
+    maxCompletionTokens,
+  });
+
+  const llm = llmProvider.langchain;
+  if (!llm || typeof llm.invoke !== 'function') {
+    throw new Error('Chat provider did not supply a LangChain-compatible chat model');
+  }
+  const checkpointer = new MemorySaver();
+
+  // Log effective LLM config + optional diag ping
+  try {
+    const kw = (llm && llm.lc_serializable && llm.lc_serializable.kwargs) || {};
+    console.log('[AGENT][llm_config]', {
+      provider: llmProvider?.provider,
+      model: kw.model || kw.modelName,
+      temperature: kw.temperature,
+      maxTokens: kw.maxTokens,
+      maxCompletionTokens: kw.maxCompletionTokens,
+      topP: kw.topP,
+      frequencyPenalty: kw.frequencyPenalty,
+    });
+  } catch (_) { }
+  if (process.env.AGENT_DIAG === '1' || process.env.AGENT_DIAG === 'true') {
+    try {
+      const r = await llm.invoke([
+        { role: 'system', content: 'You are a helpful assistant.' },
+        { role: 'user', content: 'ping' },
+      ], { maxCompletionTokens: 8 });
+      try {
+        const out = typeof r === 'string' ? r : (r && r.content ? r.content : r);
+        console.log('[AGENT][diag_llm_ok]', typeof out === 'string' ? out.slice(0, 120) : out);
+      } catch (_) { }
+    } catch (e) {
+      try {
+        const chain = unwrapError(e);
+        console.error('[AGENT][diag_llm_err]', safeJson(chain, 4000));
+      } catch (_) { }
+      throw e; // fail fast in diag mode for visibility
+    }
+  }
+
+  // 4) Create agent
+  agentExecutor = createReactAgent({
+    llm,
+    tools: allTools,
+    checkpointSaver: checkpointer,
+  });
+
+  // capture agent info for diagnostics
+  try {
+    agentInfo.toolNames = toolNames;
+    agentInfo.modelName = llmProvider?.modelName
+      || llm?.lc_serializable?.kwargs?.model
+      || process.env.AI_MODEL_NAME
+      || 'gpt-4.1';
+    agentInfo.provider = llmProvider?.provider || String(process.env.AI_PROVIDER || 'azure');
+    console.log('[AGENT][init]', {
+      model: agentInfo.modelName,
+      provider: agentInfo.provider,
+      tools: agentInfo.toolNames,
+      m365Enabled: !!mcpClients.m365,
+    });
+  } catch (_) { }
+  return agentExecutor;
+}
+
+async function runAgentStreaming({ prompt, threadId, res }) {
+  if (!prompt || !String(prompt).trim()) {
+    res.statusCode = 400;
+    sseJson(res, { error: 'Prompt is required' });
+    return sseEnd(res);
+  }
+  const executor = await initAgent();
+
+  const { randomUUID } = require('crypto');
+  const reqId = (() => { try { return randomUUID(); } catch (_) { return 'req-' + Date.now(); } })();
+  const traceEnabled = process.env.AGENT_TRACE === '1' || process.env.AGENT_TRACE === 'true';
+  const trace = traceEnabled ? [] : null;
+  const startedAt = Date.now();
+  let sentChars = 0;
+  let sentPreview = '';
+  const logOutput = process.env.AGENT_LOG_OUTPUT !== '0';
+  const logSteps = process.env.AGENT_LOG_STEPS !== '0';
+  let step = 0;                // ReAct round number
+  let awaitingTool = false;    // currently waiting for tool output
+  let phase = 'init';          // 'init' | 'reason' | 'tool' | 'observation'
+  let pendingToolCall = null;  // last tool call issued by the LLM
+  let lastObservationText = '';
+  let lastObservationSource = '';
+  const emitAgentText = (rawText, { allowReasonStep = true, source = '' } = {}) => {
+    const text = typeof rawText === 'string' ? rawText : String(rawText || '');
+    if (!text) return false;
+    if (logOutput) {
+      try {
+        sentChars += text.length;
+        if (sentPreview.length < 800) {
+          const needed = 800 - sentPreview.length;
+          if (needed > 0) sentPreview += text.slice(0, needed);
+        }
+        const live = text.length > 160 ? text.slice(0, 160) + ' ... ' : text;
+        const label = source ? `[AGENT][send:${source}]` : '[AGENT][send]';
+        console.log(label, live);
+      } catch (_) { }
+    }
+    sseWriteChunked(res, text);
+    if (allowReasonStep && logSteps && !awaitingTool) {
+      try {
+        if (phase !== 'reason') {
+          step += 1;
+          console.log('[AGENT][step]', { step, action: 'reason', preview: text.slice(0, 200) });
+        }
+        phase = 'reason';
+      } catch (_) { }
+    }
+    return true;
+  };
+  try {
+    console.log('[AGENT][start]', {
+      reqId,
+      threadId: String(threadId || 'default'),
+      model: agentInfo.modelName || (process.env.AI_MODEL_NAME || 'gpt-4.1'),
+      provider: agentInfo.provider || String(process.env.AI_PROVIDER || 'azure'),
+      tools: agentInfo.toolNames,
+      promptPreview: String(prompt).slice(0, 200)
+    });
+    if (traceEnabled) trace.push({
+      t: Date.now(),
+      type: 'start',
+      reqId,
+      threadId: String(threadId || 'default'),
+      prompt: String(prompt),
+      provider: agentInfo.provider,
+      model: agentInfo.modelName,
+    });
+  } catch (_) { }
+
+  const systemMessage = (() => {
+    let nowUtc;
+    try {
+      nowUtc = new Date().toISOString();
+    } catch (_) {
+      nowUtc = null;
+    }
+    const header = nowUtc ? `Aktuelle UTC-Zeit: ${nowUtc}` : 'Aktuelle Zeit: unbekannt';
+    return {
+      role: 'system',
+      content: [
+        header,
+        '',
+        'Du bist ein technischer Assistent für die ClaimPilot-Plattform. Sprich Deutsch, antworte kurz und strukturiert.',
+        '',
+        'Verfügbare Werkzeuge:',
+        '- Microsoft 365 (MCP): nutze sie deterministisch und mit expliziten IDs.',
+        '  • "mail.latestMessage.get" und "mail.message.fetch" liefern Posteingangsdaten.',
+        '  • Antworten/Weiterleiten erfolgen über "mail.message.replyDraft" bzw. "mail.message.send".',
+        '  • Anhänge bearbeitest du mit "mail.attachment.download" oder "mail.attachment.uploadAndAttach".',
+        '  • Termine verwaltest du mit den "calendar.*"-Tools.',
+        '  • Excel-Daten liest/schreibst du via "excel.workbook.*" (Sheet-Namen und Session-ID immer angeben).',
+        '  • Prüfe Verfügbarkeit/Token per "graph.health.check" oder "graph.token.acquire" bei Fehlern.',
+        '- Datenbankaufgaben (PostgreSQL):',
+        '  • Schema- und Objektübersicht über "postgres_list_schemas" / "postgres_list_objects".',
+        '  • CRUD mit "postgres_execute_sql" und Änderungen knapp beschreiben (z. B. "Schadensfall 4711 geschlossen"), aber keine riesigen Roh-Resultsets zurückgeben.',
+        '  • Performanceanalyse über "postgres_explain_query", "postgres_get_top_queries", "postgres_analyze_db_health" und die Index-Tools.',
+        '',
+        'Arbeitsweise:',
+        '- Nutze nur freigegebene Tools, prüfe Parameter sorgfältig, und halte die Antworten prägnant.',
+        '- Beschreibe Fehlermeldungen knapp und schlage konkrete nächste Schritte vor.',
+        '- Stoppe, sobald die Nutzeranforderung erfüllt ist.'
+      ].join('\n')
+    };
+  })();
+  const userMessage = { role: 'user', content: String(prompt) };
+
+  try {
+    // Stream agent events as SSE
+    const callbacks = [{
+      handleLLMStart: (_llm, prompts) => {
+        try {
+          const s = JSON.stringify(prompts);
+          const approxTokens = Math.ceil(s.length / 4);
+          const first = Array.isArray(prompts) && prompts.length ? prompts[0] : undefined;
+          const preview = first ? (typeof first === 'string' ? first : JSON.stringify(first)).slice(0, 400) : undefined;
+          console.log('[AGENT][llm_start]', { reqId, prompts: Array.isArray(prompts) ? prompts.length : undefined, approxTokens });
+          if (traceEnabled) trace.push({ t: Date.now(), type: 'llm_start', preview });
+        } catch (_) { }
+      },
+      handleLLMEnd: () => {
+        try { console.log('[AGENT][llm_end]', { reqId }); if (traceEnabled) trace.push({ t: Date.now(), type: 'llm_end' }); } catch (_) { }
+      },
+      handleLLMError: (err) => {
+        try { console.error('[AGENT][llm_error]', { reqId, message: err && err.message, name: err && err.name }); if (traceEnabled) trace.push({ t: Date.now(), type: 'llm_error', message: err && err.message }); } catch (_) { }
+      },
+      handleToolStart: (tool, input) => {
+        try {
+          const prev = typeof input === 'string' ? input : JSON.stringify(input || '');
+          console.log('[AGENT][cb_tool_start]', { reqId, tool, inputPreview: prev.slice(0, 200) });
+          if (traceEnabled) trace.push({ t: Date.now(), type: 'tool_start', tool, inputPreview: prev.slice(0, 400) });
+        } catch (_) { }
+      },
+      handleToolEnd: (output) => {
+        try {
+          const text = typeof output === 'string' ? output : JSON.stringify(output || '');
+          console.log('[AGENT][cb_tool_end]', { reqId, bytes: text.length, preview: text.slice(0, 200) });
+          if (traceEnabled) trace.push({ t: Date.now(), type: 'tool_end', outputPreview: text.slice(0, 400) });
+        } catch (_) { }
+      },
+      handleToolError: (err) => {
+        try { console.error('[AGENT][cb_tool_error]', { reqId, message: err && err.message, name: err && err.name }); if (traceEnabled) trace.push({ t: Date.now(), type: 'tool_error', message: err && err.message }); } catch (_) { }
+      }
+    }];
+
+    // Build messages and ensure system message is only sent once per thread
+    const msgs = [];
+    const tid = String(threadId || 'default');
+    global.__threadsWithSystem ??= new Set();
+    if (!global.__threadsWithSystem.has(tid)) {
+      msgs.push(systemMessage);
+      global.__threadsWithSystem.add(tid);
+    }
+    msgs.push(userMessage);
+
+    const stream = await executor.stream(
+      { messages: msgs },
+      {
+        recursionLimit: Number(process.env.AGENT_RECURSION_LIMIT || 15),
+        configurable: { thread_id: tid },
+        callbacks
+      }
+    );
+
+    let lastReturnText = '';
+    for await (const chunk of stream) {
+      // Agent text tokens
+      let chunkProvidedText = false;
+      if (chunk && chunk.agent && Array.isArray(chunk.agent.messages)) {
+        const msg = chunk.agent.messages[chunk.agent.messages.length - 1];
+        if (msg && msg.content) {
+          const msgHasToolCalls = Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
+          const text = extractMessageText(msg);
+          if (text) {
+            if (emitAgentText(text, { allowReasonStep: !msgHasToolCalls })) {
+              chunkProvidedText = true;
+            }
+          }
+          if (msgHasToolCalls) {
+            const call = msg.tool_calls[0];
+            try { console.log('[AGENT][tool_start]', { tool: call.name, args: call.args || {} }); } catch (_) { }
+            if (logSteps) {
+              try { if (phase !== 'tool') { /* keep same step for this round */ } console.log('[AGENT][step]', { step: Math.max(step, 1), action: 'tool_call', tool: call.name }); } catch (_) { }
+            }
+            let callArgs = call.args;
+            if (typeof callArgs === 'string') {
+              try { callArgs = JSON.parse(callArgs); }
+              catch (_) { callArgs = call.args; }
+            }
+            pendingToolCall = { name: call.name, args: callArgs };
+            awaitingTool = true;
+            phase = 'tool';
+          }
+        }
+      }
+
+      // Tool outputs
+      if (chunk && chunk.tools && Array.isArray(chunk.tools.messages) && chunk.tools.messages.length > 0) {
+        const toolMsg = chunk.tools.messages[0];
+        const toolText = typeof toolMsg?.content === 'string'
+          ? toolMsg.content
+          : Array.isArray(toolMsg?.content)
+            ? toolMsg.content.map(p => (typeof p === 'string' ? p : p?.text || '')).join('')
+            : '';
+        if (toolText) {
+          const preview = String(toolText).slice(0, 500);
+          try { console.log('[AGENT][tool_output]', preview + (toolText.length > 500 ? ' ...[truncated]' : '')); } catch (_) { }
+          if (logSteps) {
+            try { if (step === 0) step = 1; console.log('[AGENT][step]', { step, action: 'observation', preview: String(toolText).slice(0, 200) }); } catch (_) { }
+          }
+        }
+        const toolName = toolMsg?.name || pendingToolCall?.name || '';
+        const summary = summariseToolResult({
+          toolName,
+          toolMessage: toolMsg,
+          toolArgs: pendingToolCall ? pendingToolCall.args : undefined,
+          rawText: toolText,
+        });
+        const nextObservation = summary || (toolText && toolText.trim()) || '';
+        if (nextObservation) {
+          lastObservationText = nextObservation;
+          lastObservationSource = toolName || 'tool';
+        }
+        pendingToolCall = null;
+        awaitingTool = false;
+        phase = 'observation';
+      }
+
+      const fallbackText = extractFinalChunkText(chunk);
+      if (fallbackText) {
+        lastReturnText = fallbackText;
+        if (!chunkProvidedText) {
+          if (emitAgentText(fallbackText, { source: 'return_values' })) {
+            chunkProvidedText = true;
+          }
+        }
+      }
+    }
+
+    if (sentChars === 0 && lastReturnText) {
+      awaitingTool = false;
+      emitAgentText(lastReturnText, { source: 'return_values_final' });
+    } else if (sentChars === 0 && lastObservationText) {
+      awaitingTool = false;
+      emitAgentText(lastObservationText, { source: `observation:${lastObservationSource || 'tool'}`, allowReasonStep: false });
+    }
+
+    const tookMs = Date.now() - startedAt;
+    try {
+      console.log('[AGENT][end]', { threadId: String(threadId || 'default'), ms: tookMs });
+      if (logOutput) {
+        const prev = sentPreview.replace(/\s+/g, ' ').slice(0, 400);
+        console.log('[AGENT][response_end]', { chars: sentChars, preview: prev + (sentChars > prev.length ? ' …' : '') });
+      }
+    } catch (_) { }
+    if (traceEnabled && trace && trace.length) {
+      sseTrace(res, trace);
+    }
+    sseEnd(res);
+  } catch (e) {
+    // Enhanced error logging with deep unwrap and sanitized SSE response
+    try {
+      const chain = unwrapError(e);
+
+      // concise console summary
+      try {
+        const summary = chain.map((c, i) => ({
+          i,
+          name: c.name,
+          code: c.code,
+          responseStatus: c.responseStatus,
+          message: (c?.message || '').slice(0, 500),
+        }));
+        console.error('[AGENT][error]', { reqId, summary });
+      } catch (_) { }
+
+      if (traceEnabled) {
+        try { console.error('[AGENT][error_detail]', safeJson(chain, 8000)); } catch (_) { }
+      }
+
+      // extract provider-specific error if present
+      const primary = chain.find(c => c.responseData) || chain[0] || {};
+      let providerError;
+      try {
+        const d = typeof primary.responseData === 'string'
+          ? JSON.parse(primary.responseData)
+          : primary.responseData;
+        const err = (d && d.error) || d || {};
+        providerError = {
+          code: err.code,
+          message: err.message,
+          inner: err.innererror || err.details || undefined,
+        };
+      } catch (_) { }
+
+      const clientErr = {
+        reqId,
+        status: primary.responseStatus || primary.code || 500,
+        code: (providerError && providerError.code) || (chain[0] && chain[0].code) || 'ERR',
+        message: (providerError && providerError.message) || (chain[0] && chain[0].message) || 'Agent failed',
+        inner: providerError && providerError.inner,
+        provider: agentInfo.provider,
+      };
+      sseError(res, clientErr);
+    } catch (_) {
+      try { sseError(res, { message: 'Agent failed' }); } catch (_) { }
+    }
+    if (traceEnabled && trace && trace.length) {
+      sseTrace(res, trace);
+    }
+    try { sseEnd(res); } catch (_) { }
+  }
+}
+
+module.exports = { runAgentStreaming, initAgent };
+</file>
+
+<file path="agent/mcp-clients.js">
+// Minimal MCP client bootstrap: in-process M365 handlers plus optional external clients
+// CommonJS file using dynamic ESM imports where needed
+
+const process = require('process');
+const { spawnSync } = require('child_process');
+const { createM365InProcessClient } = require('./mcp-m365-inprocess');
+
+function expandEnvVars(str, env = process.env) {
+  if (!str || typeof str !== 'string') return str;
+  return str.replace(/\$\{([^}]+)\}|\$([A-Za-z0-9_]+)/g, (_match, braced, bare) => {
+    const key = (braced || bare || '').trim();
+    if (!key) return '';
+    const value = env[key];
+    return value === undefined ? '' : value;
+  });
+}
+
+function parseCommandLine(cmd) {
+  const tokens = [];
+  let cur = '';
+  let q = null;
+  for (let i = 0; i < cmd.length; i++) {
+    const ch = cmd[i];
+    if (q) {
+      if (ch === q) q = null; else cur += ch;
+    } else if (ch === '"' || ch === "'") {
+      q = ch;
+    } else if (ch === ' ') {
+      if (cur) { tokens.push(cur); cur = ''; }
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur) tokens.push(cur);
+  const command = tokens.shift();
+  return { command, args: tokens };
+}
+
+function maskUri(uri = '') {
+  if (!uri) return undefined;
+  try {
+    return uri.replace(/\/\/([^:\/@?#]+):([^@\/?#]*)@/, (_m, user) => `//${user}:***@`);
+  } catch (_) {
+    return uri;
+  }
+}
+
+async function startMcpClient(name, command, args, env) {
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
+  const transport = new StdioClientTransport({ command, args, env: { ...process.env, ...env } });
+  const client = new Client({ name: `mcp-${name}`, version: '0.1.0' }, {});
+  await client.connect(transport);
+  return { client, transport };
+}
+
+function ensureUnrestrictedArgs(args = []) {
+  const next = [...args];
+  const hasInline = next.some(a => String(a || '').includes('--access-mode=') || String(a || '') === '--access-mode');
+  if (!hasInline) {
+    next.push('--access-mode=unrestricted');
+    return next;
+  }
+
+  for (let i = 0; i < next.length; i += 1) {
+    const token = String(next[i] || '');
+    if (token === '--access-mode' && next[i + 1]) {
+      next[i + 1] = 'unrestricted';
+      return next;
+    }
+    if (token.startsWith('--access-mode=')) {
+      next[i] = '--access-mode=unrestricted';
+      return next;
+    }
+  }
+
+  next.push('--access-mode=unrestricted');
+  return next;
+}
+
+async function initAllMCPClients(options = {}) {
+  const clients = {};
+  const disableDefaults = options.disableDefaults === true;
+
+  const shouldAutoEnableM365 = () => {
+    if (options?.m365?.enable !== undefined) return options.m365.enable;
+    const flag = process.env.MCP_M365_ENABLE_INPROCESS;
+    if (flag && ['1', 'true', 'yes', 'on'].includes(String(flag).toLowerCase())) return true;
+    if (process.env.MCP_M365_ACCESS_TOKEN || process.env.GRAPH_ACCESS_TOKEN) return true;
+    if (process.env.MCP_M365_CLIENT_ID && process.env.MCP_M365_CLIENT_SECRET && process.env.MCP_M365_TENANT_ID) return true;
+    const cliCommand = options?.m365?.cli?.command
+      || process.env.MCP_M365_CLI_BIN
+      || process.env.M365_CLI_BIN
+      || 'm365';
+    try {
+      const result = spawnSync(cliCommand, ['--version'], { stdio: 'ignore' });
+      if (result && result.status === 0) return true;
+    } catch (_) { /* CLI not available */ }
+    return false;
+  };
+
+  if (options?.m365?.dependencies) {
+    try {
+      clients.m365 = createM365InProcessClient({ dependencies: options.m365.dependencies });
+    } catch (e) {
+      console.warn('[MCP] Failed to initialise in-process M365 client:', e && e.message ? e.message : String(e));
+    }
+  } else if (!disableDefaults && shouldAutoEnableM365()) {
+    try {
+      const { createDefaultM365Dependencies } = require('./mcp-m365-defaults');
+      const dependencies = await createDefaultM365Dependencies(options?.m365?.config || {});
+      clients.m365 = createM365InProcessClient({ dependencies });
+      try {
+        console.log('[MCP] In-process M365 client aktiviert');
+      } catch (_) {}
+    } catch (e) {
+      console.warn('[MCP] In-process M365 initialisation failed:', e && e.message ? e.message : String(e));
+    }
+  }
+
+  if (!disableDefaults) {
+    const pgCmd = expandEnvVars(process.env.MCP_POSTGRES_CMD);
+    if (pgCmd) {
+      try {
+        const { command, args } = parseCommandLine(pgCmd);
+        if (!command) throw new Error('MCP_POSTGRES_CMD ist leer/ungültig');
+        const unrestrictedArgs = ensureUnrestrictedArgs(args);
+        const pgEnv = {};
+        const uri = process.env.MCP_POSTGRES_URI
+          || process.env.MCP_POSTGRES_DATABASE_URI
+          || process.env.MCP_POSTGRES_URL
+          || process.env.DATABASE_URL
+          || process.env.POSTGRES_URL;
+        if (uri) {
+          pgEnv.DATABASE_URI = uri;
+        } else {
+          console.warn('[MCP] Postgres DATABASE_URI nicht gesetzt (setze MCP_POSTGRES_URI oder DATABASE_URL)');
+        }
+        const { client } = await startMcpClient('postgres', command, unrestrictedArgs, pgEnv);
+        try {
+          console.log('[MCP] Postgres client verbunden', {
+            command,
+            args: unrestrictedArgs,
+            uri: maskUri(uri || pgEnv.DATABASE_URI),
+          });
+        } catch (_) { }
+        clients.postgres = client;
+      } catch (e) {
+        console.warn('[MCP] Postgres start/connect failed:', e && e.message ? e.message : String(e));
+      }
+    }
+  }
+
+  try {
+    console.log('[MCP] Clients bereit', { clients: Object.keys(clients) });
+  } catch (_) { }
+  return clients;
+}
+
+async function closeMCPClients(clients = {}) {
+  const all = Object.values(clients);
+  await Promise.all(all.map(async (c) => { try { await c.close(); } catch (_) {} }));
+}
+
+module.exports = { initAllMCPClients, closeMCPClients };
+</file>
+
+<file path="agent/mcp-clients.spec.js">
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+function buildM365Deps() {
+  return {
+    mail: {
+      async getLatestMessage({ folderId }) {
+        return {
+          id: 'msg-1',
+          subject: 'Inbox hello',
+          receivedDateTime: '2024-12-01T08:00:00Z',
+          from: { emailAddress: { address: 'sender@example.com' } },
+          webLink: 'https://outlook.office.com/mail/0',
+          bodyPreview: 'Body preview',
+        };
+      },
+    },
+    calendar: {},
+    drive: {},
+    excel: {},
+    graph: {},
+    tooling: {},
+  };
+}
+
+test('initAllMCPClients creates in-process m365 client when dependencies provided', async () => {
+  delete require.cache[require.resolve('./mcp-clients')];
+  const { initAllMCPClients } = require('./mcp-clients');
+  const clients = await initAllMCPClients({
+    m365: { dependencies: buildM365Deps() },
+    disableDefaults: true,
+  });
+  assert.ok(clients.m365, 'Expected m365 client to be initialised');
+  const result = await clients.m365.callTool({
+    name: 'mail.latestMessage.get',
+    arguments: { folderId: 'Inbox' },
+  });
+  assert.equal(result.from, 'sender@example.com');
+  assert.equal(result.messageId, 'msg-1');
+});
+
+test('initAllMCPClients exposes manifest metadata on in-process client', async () => {
+  delete require.cache[require.resolve('./mcp-clients')];
+  const { initAllMCPClients } = require('./mcp-clients');
+  const clients = await initAllMCPClients({
+    m365: { dependencies: buildM365Deps() },
+    disableDefaults: true,
+  });
+  const manifest = await clients.m365.listTools();
+  assert.ok(Array.isArray(manifest.tools), 'manifest must contain tools array');
+  const replyDraft = manifest.tools.find((tool) => tool.name === 'mail.message.replyDraft');
+  assert.ok(replyDraft, 'manifest should include replyDraft tool');
+  assert.equal(replyDraft.metadata.deterministic, true);
+});
+
+test('initAllMCPClients throws helpful error for unknown tool name', async () => {
+  delete require.cache[require.resolve('./mcp-clients')];
+  const { initAllMCPClients } = require('./mcp-clients');
+  const clients = await initAllMCPClients({
+    m365: { dependencies: buildM365Deps() },
+    disableDefaults: true,
+  });
+  await assert.rejects(async () => {
+    await clients.m365.callTool({ name: 'unknown.tool', arguments: {} });
+  }, /unknown MCP tool: unknown\.tool/);
+});
+</file>
+
+<file path="agent/mcp-jsonschema.js">
+function jsonSchemaToZod(schema, z) {
+  if (!schema || typeof schema !== 'object') {
+    throw new Error('schema must be an object');
+  }
+  if (!z || typeof z !== 'object') {
+    throw new Error('zod instance is required');
+  }
+
+  function convert(current) {
+    if (!current || typeof current !== 'object') {
+      throw new Error('Invalid JSON schema node');
+    }
+
+    if (current.enum) {
+      const values = current.enum;
+      if (!Array.isArray(values) || values.length === 0) {
+        throw new Error('enum must be a non-empty array');
+      }
+      if (values.every((value) => typeof value === 'string')) {
+        return z.enum(values);
+      }
+      return z.union(values.map((value) => z.literal(value)));
+    }
+
+    if (Array.isArray(current.type)) {
+      const variants = current.type.map((typeVariant) => convert({
+        ...current,
+        type: typeVariant,
+        enum: undefined,
+      }));
+      return z.union(variants);
+    }
+
+    switch (current.type) {
+      case 'string': {
+        let base = z.string();
+        if (current.format === 'date-time') {
+          base = base.refine((value) => !Number.isNaN(Date.parse(value)), {
+            message: 'Invalid date-time format',
+          });
+        }
+        return applyCommon(base, current);
+      }
+      case 'number':
+      case 'integer': {
+        let base = current.type === 'integer' ? z.number().int() : z.number();
+        if (typeof current.minimum === 'number') base = base.min(current.minimum);
+        if (typeof current.maximum === 'number') base = base.max(current.maximum);
+        return applyCommon(base, current);
+      }
+      case 'boolean':
+        return applyCommon(z.boolean(), current);
+      case 'null':
+        return z.null();
+      case 'array': {
+        const itemSchema = current.items ? convert(current.items) : z.any();
+        let base = z.array(itemSchema);
+        if (typeof current.minItems === 'number') base = base.min(current.minItems);
+        if (typeof current.maxItems === 'number') base = base.max(current.maxItems);
+        return applyCommon(base, current);
+      }
+      case 'object': {
+        const props = current.properties || {};
+        const required = new Set(current.required || []);
+        const shape = {};
+        for (const [key, propertySchema] of Object.entries(props)) {
+          let propZod = convert(propertySchema);
+          const isRequired = required.has(key);
+          const hasDefault = Object.prototype.hasOwnProperty.call(propertySchema, 'default');
+          if (!isRequired) {
+            propZod = propZod.optional();
+          }
+          if (hasDefault) {
+            propZod = propZod.default(propertySchema.default);
+          }
+          shape[key] = propZod;
+        }
+        let base = z.object(shape);
+        if (current.additionalProperties === true) {
+          base = base.passthrough();
+        } else if (current.additionalProperties === false) {
+          base = base.strict();
+        }
+        return applyCommon(base, current);
+      }
+      default:
+        return applyCommon(z.any(), current);
+    }
+  }
+
+  function applyCommon(base, node) {
+    let schema = base;
+    if (Object.prototype.hasOwnProperty.call(node, 'default')) {
+      schema = schema.default(node.default);
+    }
+    if (node.nullable) {
+      schema = schema.nullable();
+    }
+    return schema;
+  }
+
+  return convert(schema);
+}
+
+module.exports = { jsonSchemaToZod };
+</file>
+
+<file path="agent/mcp-jsonschema.spec.js">
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { z } = require('zod');
+
+const { jsonSchemaToZod } = require('./mcp-jsonschema');
+
+test('jsonSchemaToZod converts object schema with required fields', () => {
+  const schema = {
+    type: 'object',
+    required: ['foo', 'flag'],
+    properties: {
+      foo: { type: 'string' },
+      flag: { type: 'boolean', default: true },
+      optional: { type: 'number' },
+    },
+  };
+  const zodSchema = jsonSchemaToZod(schema, z);
+  const parsed = zodSchema.parse({ foo: 'bar', flag: false });
+  assert.deepEqual(parsed, { foo: 'bar', flag: false });
+  assert.throws(() => zodSchema.parse({ flag: true }), /Required/);
+});
+
+test('jsonSchemaToZod handles arrays of strings', () => {
+  const schema = {
+    type: 'object',
+    required: ['items'],
+    properties: {
+      items: {
+        type: 'array',
+        items: { type: 'string' },
+      },
+    },
+  };
+  const zodSchema = jsonSchemaToZod(schema, z);
+  const parsed = zodSchema.parse({ items: ['a', 'b'] });
+  assert.deepEqual(parsed.items, ['a', 'b']);
+  assert.throws(() => zodSchema.parse({ items: [1] }), /Expected string/);
+});
+
+test('jsonSchemaToZod handles nested array union values', () => {
+  const schema = {
+    type: 'object',
+    required: ['values'],
+    properties: {
+      values: {
+        type: 'array',
+        items: {
+          type: 'array',
+          items: { type: ['string', 'number', 'null'] },
+        },
+      },
+    },
+  };
+  const zodSchema = jsonSchemaToZod(schema, z);
+  const parsed = zodSchema.parse({ values: [['a', null], [1, 2]] });
+  assert.equal(parsed.values[0][0], 'a');
+  assert.throws(() => zodSchema.parse({ values: [[{ foo: 'bar' }]] }), /Expected string|number|null/);
+});
+</file>
+
+<file path="agent/mcp-m365-defaults.js">
+const path = require('path');
+const fs = require('fs/promises');
+const { execFile } = require('child_process');
+
+function decodeJwtExpiry(token) {
+  if (!token || typeof token !== 'string') return null;
+  const segments = token.split('.');
+  if (segments.length < 2) return null;
+  let payload = segments[1];
+  try {
+    payload = payload.replace(/-/g, '+').replace(/_/g, '/');
+    while (payload.length % 4 !== 0) payload += '=';
+    const json = Buffer.from(payload, 'base64').toString('utf8');
+    const parsed = JSON.parse(json);
+    if (parsed && typeof parsed.exp === 'number') {
+      return new Date(parsed.exp * 1000);
+    }
+  } catch (_) { /* ignore and fall back */ }
+  return null;
+}
+
+function createCliTokenProvider({
+  command = process.env.MCP_M365_CLI_BIN || 'm365',
+  args,
+  resource = 'https://graph.microsoft.com',
+  timeout = Number(process.env.MCP_M365_CLI_TIMEOUT_MS || 8000),
+  disable = process.env.MCP_M365_DISABLE_CLI === '1' || process.env.MCP_M365_DISABLE_CLI === 'true',
+} = {}) {
+  if (disable) return null;
+  const finalArgs = Array.isArray(args) && args.length
+    ? args
+    : ['util', 'accesstoken', 'get', '--resource', resource, '--output', 'text'];
+  return async () => new Promise((resolve) => {
+    try {
+      const child = execFile(command, finalArgs, { timeout }, (err, stdout) => {
+        if (err) return resolve(null);
+        const token = String(stdout || '').trim();
+        if (!token) return resolve(null);
+        const expiresAt = decodeJwtExpiry(token) || new Date(Date.now() + 10 * 60 * 1000);
+        resolve({ token, expiresAt });
+      });
+      child.on('error', () => resolve(null));
+    } catch (_) {
+      resolve(null);
+    }
+  });
+}
+
+function buildUrl(baseUrl, pathname, query) {
+  const url = new URL(pathname.startsWith('http') ? pathname : `${baseUrl}${pathname.startsWith('/') ? '' : '/'}${pathname}`);
+  if (query && typeof query === 'object') {
+    for (const [key, value] of Object.entries(query)) {
+      if (value === undefined || value === null) continue;
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          url.searchParams.append(key, item);
+        }
+      } else {
+        url.searchParams.append(key, value);
+      }
+    }
+  }
+  return url;
+}
+
+function createTokenManager({ env, accessToken, fetchImpl, now, cliProvider }) {
+  let cached;
+  let cliAnnounced = false;
+
+  async function acquire(scopeSet) {
+    if (accessToken) return accessToken;
+    const envToken = env.MCP_M365_ACCESS_TOKEN || env.GRAPH_ACCESS_TOKEN || env.AZURE_ACCESS_TOKEN;
+    if (envToken) return envToken;
+
+    const nowTs = now();
+    if (cached && cached.expiresAt > nowTs) {
+      return cached.token;
+    }
+
+    if (cliProvider) {
+      try {
+        const cliResult = await cliProvider();
+        if (cliResult && cliResult.token) {
+          cached = {
+            token: cliResult.token,
+            expiresAt: cliResult.expiresAt || new Date(nowTs.getTime() + 10 * 60 * 1000),
+          };
+          if (!cliAnnounced) {
+            try { console.log('[MCP][M365]', 'Nutze bestehende m365 CLI Anmeldung für Graph-Tokens'); } catch (_) {}
+            cliAnnounced = true;
+          }
+          return cached.token;
+        }
+      } catch (_) { /* ignore and continue */ }
+    }
+
+    const tenantId = env.MCP_M365_TENANT_ID || env.AZURE_TENANT_ID;
+    const clientId = env.MCP_M365_CLIENT_ID || env.AZURE_CLIENT_ID;
+    const clientSecret = env.MCP_M365_CLIENT_SECRET || env.AZURE_CLIENT_SECRET;
+    if (!tenantId || !clientId || !clientSecret) {
+      throw new Error('Microsoft Graph Zugang nicht konfiguriert (setze MCP_M365_ACCESS_TOKEN oder führe "m365 login" aus)');
+    }
+
+    const scope = Array.isArray(scopeSet) && scopeSet.length
+      ? scopeSet.join(' ')
+      : env.MCP_M365_DEFAULT_SCOPE || 'https://graph.microsoft.com/.default';
+
+    const bodyParams = new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      scope,
+      grant_type: 'client_credentials',
+    });
+
+    const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
+    const response = await fetchImpl(tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: bodyParams.toString(),
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(`Token request failed: ${response.status} ${text}`);
+    }
+    const data = await response.json();
+    const expiresIn = Number(data.expires_in || 3600);
+    const expiry = new Date(nowTs.getTime() + Math.max(expiresIn - 60, 60) * 1000);
+    cached = { token: data.access_token, expiresAt: expiry };
+    return cached.token;
+  }
+
+  return {
+    async getToken(scopeSet) {
+      return acquire(scopeSet);
+    },
+    getCachedToken() {
+      if (accessToken) return accessToken;
+      return cached ? cached.token : env.MCP_M365_ACCESS_TOKEN || env.GRAPH_ACCESS_TOKEN || null;
+    }
+  };
+}
+
+function ensureFetch(fetchImpl) {
+  if (typeof fetchImpl === 'function') return fetchImpl;
+  if (typeof globalThis.fetch === 'function') return globalThis.fetch.bind(globalThis);
+  throw new Error('A fetch implementation is required for Microsoft Graph requests');
+}
+
+async function createDefaultM365Dependencies(options = {}) {
+  const env = options.env || process.env;
+  const fetchImpl = ensureFetch(options.fetchImpl);
+  const fileSystem = options.fs || fs;
+  const now = options.now || (() => new Date());
+  const baseUrl = options.baseUrl || 'https://graph.microsoft.com/v1.0';
+  const accessToken = options.accessToken;
+  const cliProvider = createCliTokenProvider(options.cli);
+  const tokenManager = createTokenManager({ env, accessToken, fetchImpl, now, cliProvider });
+  const featureStore = new Map();
+
+  async function graphFetch(pathname, {
+    method = 'GET',
+    query,
+    headers = {},
+    body,
+    prefer,
+    responseType = 'json',
+    scopeSet,
+  } = {}) {
+    const token = await tokenManager.getToken(scopeSet);
+    const url = buildUrl(baseUrl, pathname, query);
+    const finalHeaders = { Authorization: `Bearer ${token}`, ...headers };
+    let payload = body;
+    const isBuffer = Buffer.isBuffer(body);
+    if (body && typeof body === 'object' && !isBuffer && typeof body.pipe !== 'function') {
+      finalHeaders['Content-Type'] = finalHeaders['Content-Type'] || 'application/json';
+      payload = JSON.stringify(body);
+    }
+    if (isBuffer) {
+      finalHeaders['Content-Type'] = finalHeaders['Content-Type'] || 'application/octet-stream';
+    }
+    if (prefer) {
+      const preferValues = Array.isArray(prefer) ? prefer : [prefer];
+      finalHeaders.Prefer = preferValues.join(', ');
+    }
+    const response = await fetchImpl(url.toString(), { method, headers: finalHeaders, body: payload });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(`Graph request failed: ${method} ${url.pathname} -> ${response.status} ${text}`);
+    }
+    if (responseType === 'raw') return response;
+    if (responseType === 'text') return response.text();
+    if (responseType === 'buffer') {
+      if (typeof response.arrayBuffer === 'function') {
+        const buf = await response.arrayBuffer();
+        return Buffer.from(buf);
+      }
+      const text = await response.text();
+      return Buffer.from(text);
+    }
+    return response.json();
+  }
+
+  function normaliseMessageList(result = {}) {
+    const value = result.value || [];
+    return value[0];
+  }
+
+  const mail = {
+    async getLatestMessage({ folderId = 'inbox', select, includeBodyPreview = false } = {}) {
+      const baseSelect = ['id', 'subject', 'receivedDateTime', 'from', 'webLink'];
+      if (includeBodyPreview) baseSelect.push('bodyPreview');
+      if (Array.isArray(select)) baseSelect.push(...select);
+      const finalSelect = Array.from(new Set(baseSelect)).join(',');
+      const data = await graphFetch(`/me/mailFolders/${folderId}/messages`, {
+        query: {
+          '$orderby': 'receivedDateTime desc',
+          '$top': 1,
+          '$select': finalSelect,
+        },
+      });
+      return normaliseMessageList(data);
+    },
+
+    async fetchMessage({ messageId, preferTextBody = true, expandAttachments = false } = {}) {
+      if (!messageId) throw new Error('messageId is required');
+      const prefer = [];
+      if (preferTextBody) prefer.push('outlook.body-content-type="text"');
+      const expand = expandAttachments ? '$expand=attachments' : null;
+      const query = expand ? { '$expand': 'attachments' } : undefined;
+      return graphFetch(`/me/messages/${messageId}`, { prefer, query });
+    },
+
+    async createReplyDraft({ messageId, preferHeaders } = {}) {
+      if (!messageId) throw new Error('messageId is required');
+      const data = await graphFetch(`/me/messages/${messageId}/createReply`, {
+        method: 'POST',
+        prefer: preferHeaders,
+      });
+      const draftId = data && (data.id || data.messageId || data.value?.[0]?.id);
+      const etag = data && (data['@odata.etag'] || data.etag);
+      return { draftId, etag };
+    },
+
+    async patchDraftBody({ draftId, body, contentType = 'Text', etag, preferHeaders } = {}) {
+      if (!draftId) throw new Error('draftId is required');
+      const headers = {};
+      if (etag) headers['If-Match'] = etag;
+      const data = await graphFetch(`/me/messages/${draftId}`, {
+        method: 'PATCH',
+        headers,
+        prefer: preferHeaders,
+        body: {
+          body: {
+            contentType,
+            content: body,
+          },
+        },
+      });
+      return { etag: data && (data['@odata.etag'] || data.etag || etag) };
+    },
+
+    async sendDraft({ draftId, saveToSentItems = true, preferHeaders } = {}) {
+      if (!draftId) throw new Error('draftId is required');
+      await graphFetch(`/me/messages/${draftId}/send`, {
+        method: 'POST',
+        prefer: preferHeaders,
+      });
+      return {};
+    },
+
+    async sendMessage({ subject, body, bodyContentType = 'Text', to = [], internetHeaders, attachments = [], saveToSentItems = true } = {}) {
+      if (!subject) throw new Error('subject is required');
+      if (!body) throw new Error('body is required');
+      if (!Array.isArray(to) || !to.length) throw new Error('recipient list is empty');
+      const message = {
+        subject,
+        body: {
+          contentType: bodyContentType,
+          content: body,
+        },
+        toRecipients: to.map((address) => ({ emailAddress: { address } })),
+        internetMessageHeaders: internetHeaders
+          ? Object.entries(internetHeaders).map(([name, value]) => ({ name, value }))
+          : undefined,
+        attachments: attachments.length ? attachments.map((item) => ({
+          '@odata.type': '#microsoft.graph.fileAttachment',
+          name: item.name,
+          contentBytes: item.contentBytes,
+        })) : undefined,
+      };
+      if (attachments.length) {
+        for (const attachment of attachments) {
+          if (!attachment.contentBytes && attachment.path) {
+            const buffer = await fileSystem.readFile(attachment.path);
+            attachment.contentBytes = buffer.toString('base64');
+          }
+        }
+      }
+      await graphFetch('/me/sendMail', {
+        method: 'POST',
+        body: {
+          message,
+          saveToSentItems,
+        },
+      });
+      return { internetMessageId: null };
+    },
+
+    async downloadAttachment({ messageId, attachmentId, targetPath } = {}) {
+      if (!messageId) throw new Error('messageId is required');
+      if (!attachmentId) throw new Error('attachmentId is required');
+      if (!targetPath) throw new Error('targetPath is required');
+      const data = await graphFetch(`/me/messages/${messageId}/attachments/${attachmentId}`, {});
+      const content = data && data.contentBytes ? Buffer.from(data.contentBytes, 'base64') : null;
+      if (!content) throw new Error('Attachment content not available');
+      const destinationDir = path.dirname(targetPath);
+      await fileSystem.mkdir(destinationDir, { recursive: true }).catch(() => {});
+      await fileSystem.writeFile(targetPath, content);
+      return { filePath: targetPath };
+    },
+
+    async uploadAndAttach({ messageId, filePath, contentType } = {}) {
+      if (!messageId) throw new Error('messageId is required');
+      if (!filePath) throw new Error('filePath is required');
+      const buffer = await fileSystem.readFile(filePath);
+      const attachment = {
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        name: path.basename(filePath),
+        contentType: contentType || undefined,
+        contentBytes: buffer.toString('base64'),
+      };
+      const data = await graphFetch(`/me/messages/${messageId}/attachments`, {
+        method: 'POST',
+        body: attachment,
+      });
+      return { attachmentId: data && data.id };
+    },
+  };
+
+  const calendar = {
+    async listEvents({ startDateTime, endDateTime, calendarId = 'me' } = {}) {
+      if (!startDateTime || !endDateTime) throw new Error('startDateTime and endDateTime are required');
+      const data = await graphFetch('/me/calendarview', {
+        query: {
+          startDateTime,
+          endDateTime,
+        },
+        headers: {
+          Prefer: 'outlook.timezone="UTC"',
+        },
+      });
+      return { events: data.value || [] };
+    },
+
+    async createOrUpdateEvent({ eventId, subject, body, start, end, attendees = [], location } = {}) {
+      if (!subject) throw new Error('subject is required');
+      if (!start || !end) throw new Error('start and end are required');
+      const payload = {
+        subject,
+        body: body ? { contentType: 'HTML', content: body } : undefined,
+        start: { dateTime: start, timeZone: 'UTC' },
+        end: { dateTime: end, timeZone: 'UTC' },
+        attendees: attendees.map((address) => ({ emailAddress: { address }, type: 'required' })),
+        location: location ? { displayName: location } : undefined,
+      };
+      if (eventId) {
+        await graphFetch(`/me/events/${eventId}`, { method: 'PATCH', body: payload });
+        return { status: 'updated', eventId };
+      }
+      const created = await graphFetch('/me/events', { method: 'POST', body: payload });
+      return { status: 'created', eventId: created && created.id };
+    },
+
+    async cancelEvent({ eventId, comment } = {}) {
+      if (!eventId) throw new Error('eventId is required');
+      await graphFetch(`/me/events/${eventId}/cancel`, {
+        method: 'POST',
+        body: { comment: comment || '' },
+      });
+      return { status: 'cancelled', eventId };
+    },
+  };
+
+  const drive = {
+    async uploadFile({ sourcePath, drivePath, conflictBehavior = 'replace' } = {}) {
+      if (!sourcePath) throw new Error('sourcePath is required');
+      if (!drivePath) throw new Error('drivePath is required');
+      const buffer = await fileSystem.readFile(sourcePath);
+      const encodedPath = drivePath.startsWith('/') ? drivePath : `/${drivePath}`;
+      const response = await graphFetch(`/me/drive/root:${encodedPath}:/content`, {
+        method: 'PUT',
+        headers: { 'If-Match': '*' },
+        query: {
+          '@microsoft.graph.conflictBehavior': conflictBehavior,
+        },
+        body: buffer,
+        responseType: 'json',
+      });
+      return { driveItemId: response && response.id };
+    },
+  };
+
+  function workbookHeaders(session) {
+    return session ? { 'workbook-session-id': session } : {};
+  }
+
+  const excel = {
+    async listSheets({ driveItemId, workbookSession } = {}) {
+      if (!driveItemId) throw new Error('driveItemId is required');
+      if (!workbookSession) throw new Error('workbookSession is required');
+      const data = await graphFetch(`/me/drive/items/${driveItemId}/workbook/worksheets`, {
+        headers: workbookHeaders(workbookSession),
+      });
+      const sheets = (data.value || []).map((item) => item.name);
+      return { sheets };
+    },
+
+    async readRange({ driveItemId, workbookSession, sheetName, range, valuesOnly = true, preferValues = false } = {}) {
+      if (!driveItemId) throw new Error('driveItemId is required');
+      if (!workbookSession) throw new Error('workbookSession is required');
+      const headers = workbookHeaders(workbookSession);
+      if (preferValues) headers.Prefer = 'outlook.body-content-type="text"';
+      let endpoint;
+      if (sheetName && range) {
+        endpoint = `/me/drive/items/${driveItemId}/workbook/worksheets('${sheetName}')/range(address='${range}')`;
+      } else if (sheetName) {
+        endpoint = `/me/drive/items/${driveItemId}/workbook/worksheets('${sheetName}')/usedRange(valuesOnly=${valuesOnly ? 'true' : 'false'})`;
+      } else {
+        endpoint = `/me/drive/items/${driveItemId}/workbook/usedRange(valuesOnly=${valuesOnly ? 'true' : 'false'})`;
+      }
+      const data = await graphFetch(endpoint, { headers });
+      return { address: data.address, values: data.values || [] };
+    },
+
+    async updateRange({ driveItemId, workbookSession, sheetName, range, values, matchExpected } = {}) {
+      if (!driveItemId) throw new Error('driveItemId is required');
+      if (!workbookSession) throw new Error('workbookSession is required');
+      if (!sheetName) throw new Error('sheetName is required');
+      if (!range) throw new Error('range is required');
+      if (!Array.isArray(values)) throw new Error('values must be an array');
+      const headers = workbookHeaders(workbookSession);
+      if (matchExpected) headers['If-Match'] = '*';
+      const endpoint = `/me/drive/items/${driveItemId}/workbook/worksheets('${sheetName}')/range(address='${range}')`;
+      await graphFetch(endpoint, {
+        method: 'PATCH',
+        headers,
+        body: { values },
+      });
+      return { modifiedRange: `${sheetName}!${range}` };
+    },
+  };
+
+  const graph = {
+    async healthCheck({ pingEndpoint = `${baseUrl}/me` } = {}) {
+      const start = now();
+      const startMs = start instanceof Date ? start.getTime() : Number(start);
+      await graphFetch(pingEndpoint.replace(baseUrl, ''), {});
+      const end = now();
+      const endMs = end instanceof Date ? end.getTime() : Number(end);
+      const latencyMs = Number.isFinite(endMs - startMs) ? Math.max(0, endMs - startMs) : 0;
+      return { status: 'healthy', latencyMs };
+    },
+
+    async acquireToken({ scopeSet } = {}) {
+      const token = await tokenManager.getToken(scopeSet);
+      return { status: 'acquired', expiresOn: null, token };
+    },
+  };
+
+  const tooling = {
+    async updateFeatureToggle({ feature, enabled, context } = {}) {
+      if (!feature) throw new Error('feature is required');
+      if (typeof enabled !== 'boolean') throw new Error('enabled must be boolean');
+      const record = {
+        feature,
+        enabled,
+        context,
+        updatedAt: now().toISOString(),
+      };
+      featureStore.set(feature, record);
+      return record;
+    },
+  };
+
+  return { mail, calendar, drive, excel, graph, tooling };
+}
+
+module.exports = { createDefaultM365Dependencies };
+</file>
+
+<file path="agent/mcp-m365-defaults.spec.js">
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const { createDefaultM365Dependencies } = require('./mcp-m365-defaults');
+const { createM365ToolHandlers } = require('./mcp-m365-tools');
+
+function createResponse(body, status = 200, headers = {}) {
+  const headerStore = {};
+  for (const [key, value] of Object.entries(headers)) {
+    headerStore[key.toLowerCase()] = value;
+  }
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: {
+      get: (key) => headerStore[key.toLowerCase()],
+    },
+    async json() { return body; },
+    async text() { return typeof body === 'string' ? body : JSON.stringify(body); },
+  };
+}
+
+function createFetchStub(sequence) {
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    const next = sequence.shift();
+    if (!next) {
+      throw new Error(`Unexpected fetch call for ${url}`);
+    }
+    calls.push({ url, options });
+    return next(url, options);
+  };
+  return { fetchImpl, calls };
+}
+
+function createFsStub() {
+  const files = new Map();
+  return {
+    files,
+    async readFile(path) {
+      if (!files.has(path)) throw new Error(`ENOENT:${path}`);
+      return files.get(path);
+    },
+    async writeFile(path, data) {
+      files.set(path, Buffer.from(data));
+    },
+    async mkdir() { /* noop for tests */ },
+    async stat(path) {
+      if (!files.has(path)) throw new Error('ENOENT');
+      return { isFile: () => true };
+    },
+  };
+}
+
+test('mail.latestMessage.get queries Graph inbox deterministically', async () => {
+  const { fetchImpl, calls } = createFetchStub([
+    () => createResponse({
+      value: [
+        {
+          id: 'msg-1',
+          subject: 'Test',
+          receivedDateTime: '2024-12-01T10:00:00Z',
+          from: { emailAddress: { address: 'sender@example.com' } },
+          webLink: 'https://outlook.office.com/mail/',
+          bodyPreview: 'Preview',
+        },
+      ],
+    }),
+  ]);
+  const deps = await createDefaultM365Dependencies({ fetchImpl, accessToken: 'token-123', fs: createFsStub() });
+  const handlers = createM365ToolHandlers(deps);
+  const result = await handlers['mail.latestMessage.get']({ folderId: 'inbox' });
+  assert.equal(result.messageId, 'msg-1');
+  assert.equal(result.from, 'sender@example.com');
+  assert.ok(calls[0].url.startsWith('https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages'));
+  assert.ok(calls[0].options.headers.Authorization.includes('token-123'));
+});
+
+test('mail.message.replyDraft issues create, patch and send requests', async () => {
+  const { fetchImpl, calls } = createFetchStub([
+    () => createResponse({ id: 'draft-1', '@odata.etag': 'W/"etag-1"' }),
+    () => createResponse({ '@odata.etag': 'W/"etag-2"' }),
+    () => createResponse({}),
+  ]);
+  const deps = await createDefaultM365Dependencies({ fetchImpl, accessToken: 'token-456', fs: createFsStub() });
+  const handlers = createM365ToolHandlers(deps);
+  const output = await handlers['mail.message.replyDraft']({
+    messageId: 'msg-123',
+    body: 'Antwort',
+    contentType: 'Text',
+    preferHeaders: ['return=representation'],
+    saveToSentItems: true,
+  });
+  assert.equal(output.status, 'sent');
+  assert.equal(calls.length, 3);
+  assert.ok(calls[0].url.includes('/createReply'));
+  assert.equal(calls[1].options.method, 'PATCH');
+  assert.ok(calls[1].options.headers['If-Match']);
+  assert.equal(calls[2].options.method, 'POST');
+});
+
+test('excel.workbook.readRange uses workbook session header', async () => {
+  const { fetchImpl, calls } = createFetchStub([
+    () => createResponse({ sheets: [{ name: 'Sheet1' }] }),
+    () => createResponse({ address: 'Sheet1!A1:B2', values: [["A", "B"], ["C", "D"]] }),
+  ]);
+  const deps = await createDefaultM365Dependencies({ fetchImpl, accessToken: 'token-789', fs: createFsStub() });
+  const handlers = createM365ToolHandlers(deps);
+  await handlers['excel.workbook.listSheets']({ driveItemId: 'drive-1', workbookSession: 'session-1' });
+  const result = await handlers['excel.workbook.readRange']({
+    driveItemId: 'drive-1',
+    workbookSession: 'session-1',
+    sheetName: 'Sheet1',
+  });
+  assert.equal(result.address, 'Sheet1!A1:B2');
+  assert.equal(calls[1].options.headers['workbook-session-id'], 'session-1');
+});
+
+test('graph.health.check returns health metadata', async () => {
+  const { fetchImpl } = createFetchStub([
+    () => createResponse({ id: 'user' }),
+  ]);
+  const deps = await createDefaultM365Dependencies({ fetchImpl, accessToken: 'token-graph', fs: createFsStub() });
+  const result = await deps.graph.healthCheck({ pingEndpoint: 'https://graph.microsoft.com/v1.0/me' });
+  assert.equal(result.status, 'healthy');
+  assert.ok(result.latencyMs >= 0);
+});
+
+test('tooling.feature.toggle stores state deterministically', async () => {
+  const deps = await createDefaultM365Dependencies({
+    fetchImpl: async () => createResponse({}),
+    accessToken: 'token',
+    fs: createFsStub(),
+  });
+  const handlers = createM365ToolHandlers(deps);
+  const first = await handlers['tooling.feature.toggle']({ feature: 'mcp', enabled: true, context: { actor: 'test' } });
+  assert.equal(first.status, 'updated');
+  const second = await handlers['tooling.feature.toggle']({ feature: 'mcp', enabled: false });
+  assert.equal(second.enabled, false);
+});
+</file>
+
+<file path="agent/mcp-m365-inprocess.js">
+const { createM365ToolManifest } = require('./mcp-tool-manifest');
+const { createM365ToolHandlers } = require('./mcp-m365-tools');
+
+function ensureObject(value, message) {
+  if (!value || typeof value !== 'object') {
+    throw new Error(message);
+  }
+}
+
+function createM365InProcessClient({ dependencies }) {
+  ensureObject(dependencies, 'dependencies object is required');
+  const manifest = createM365ToolManifest();
+  const handlers = createM365ToolHandlers(dependencies);
+  const handlerNames = new Set(Object.keys(handlers));
+
+  async function callTool({ name, arguments: args = {} } = {}) {
+    if (!handlerNames.has(name)) {
+      throw new Error(`unknown MCP tool: ${name}`);
+    }
+    const handler = handlers[name];
+    return handler(args);
+  }
+
+  async function listTools() {
+    return manifest;
+  }
+
+  async function close() {
+    // Nothing to dispose yet, but keep signature for symmetry
+  }
+
+  return {
+    callTool,
+    listTools,
+    close,
+  };
+}
+
+module.exports = { createM365InProcessClient };
+</file>
+
+<file path="agent/mcp-m365-tools.js">
+const { createM365ToolManifest } = require('./mcp-tool-manifest');
+
+function assertFunction(fn, message) {
+  if (typeof fn !== 'function') {
+    throw new Error(message);
+  }
+}
+
+function normaliseMessageSender(from) {
+  if (!from) return undefined;
+  if (typeof from === 'string') return from;
+  if (from.emailAddress && typeof from.emailAddress.address === 'string') {
+    return from.emailAddress.address;
+  }
+  if (typeof from.address === 'string') return from.address;
+  if (typeof from.email === 'string') return from.email;
+  return undefined;
+}
+
+function createM365ToolHandlers(dependencies = {}) {
+  const manifest = createM365ToolManifest();
+  const handlers = {};
+
+  const mailDeps = dependencies.mail || {};
+  const calendarDeps = dependencies.calendar || {};
+  const driveDeps = dependencies.drive || {};
+  const excelDeps = dependencies.excel || {};
+  const graphDeps = dependencies.graph || {};
+  const toolingDeps = dependencies.tooling || {};
+
+  handlers['mail.latestMessage.get'] = async ({ folderId = 'inbox', select, includeBodyPreview = false } = {}) => {
+    assertFunction(mailDeps.getLatestMessage, 'mail.getLatestMessage dependency missing');
+    const result = await mailDeps.getLatestMessage({ folderId, select, includeBodyPreview });
+    if (!result) return null;
+    const from = normaliseMessageSender(result.from);
+    const messageId = result.id || result.messageId;
+    return {
+      messageId,
+      subject: result.subject,
+      receivedDateTime: result.receivedDateTime,
+      from,
+      webLink: result.webLink,
+      bodyPreview: result.bodyPreview,
+    };
+  };
+
+  handlers['mail.message.fetch'] = async ({ messageId, preferTextBody = true, expandAttachments = false } = {}) => {
+    if (!messageId) throw new Error('messageId is required');
+    assertFunction(mailDeps.fetchMessage, 'mail.fetchMessage dependency missing');
+    const result = await mailDeps.fetchMessage({ messageId, preferTextBody, expandAttachments });
+    if (!result) return null;
+    return {
+      messageId: result.id || result.messageId || messageId,
+      subject: result.subject,
+      body: result.body,
+      headers: result.headers,
+      attachments: result.attachments,
+    };
+  };
+
+  handlers['mail.message.replyDraft'] = async ({
+    messageId,
+    body,
+    contentType = 'Text',
+    preferHeaders,
+    saveToSentItems = true,
+  } = {}) => {
+    if (!messageId) throw new Error('messageId is required');
+    if (typeof body !== 'string' || !body) throw new Error('body is required');
+    assertFunction(mailDeps.createReplyDraft, 'mail.createReplyDraft dependency missing');
+    assertFunction(mailDeps.patchDraftBody, 'mail.patchDraftBody dependency missing');
+    assertFunction(mailDeps.sendDraft, 'mail.sendDraft dependency missing');
+
+    const { draftId, etag } = await mailDeps.createReplyDraft({ messageId, preferHeaders });
+    if (!draftId) {
+      throw new Error('createReplyDraft must return { draftId, etag }');
+    }
+    const patchResult = await mailDeps.patchDraftBody({ draftId, body, contentType, etag, preferHeaders });
+    const finalEtag = (patchResult && patchResult.etag) || etag;
+    await mailDeps.sendDraft({ draftId, saveToSentItems, preferHeaders });
+    return { status: 'sent', draftId, etag: finalEtag };
+  };
+
+  handlers['mail.message.send'] = async ({
+    subject,
+    body,
+    to,
+    bodyContentType = 'Text',
+    internetHeaders,
+    attachments,
+    saveToSentItems = true,
+  } = {}) => {
+    if (!Array.isArray(to) || to.length === 0) throw new Error('to must contain at least one recipient');
+    if (typeof subject !== 'string') throw new Error('subject is required');
+    if (typeof body !== 'string') throw new Error('body is required');
+    assertFunction(mailDeps.sendMessage, 'mail.sendMessage dependency missing');
+    const result = await mailDeps.sendMessage({ subject, body, bodyContentType, to, internetHeaders, attachments, saveToSentItems });
+    return {
+      status: 'sent',
+      internetMessageId: result && result.internetMessageId,
+    };
+  };
+
+  handlers['mail.attachment.download'] = async ({ messageId, attachmentId, targetPath } = {}) => {
+    if (!messageId) throw new Error('messageId is required');
+    if (!attachmentId) throw new Error('attachmentId is required');
+    if (!targetPath) throw new Error('targetPath is required');
+    assertFunction(mailDeps.downloadAttachment, 'mail.downloadAttachment dependency missing');
+    const result = await mailDeps.downloadAttachment({ messageId, attachmentId, targetPath });
+    return {
+      status: 'saved',
+      filePath: result && result.filePath ? result.filePath : targetPath,
+    };
+  };
+
+  handlers['mail.attachment.uploadAndAttach'] = async ({ messageId, filePath, contentType } = {}) => {
+    if (!messageId) throw new Error('messageId is required');
+    if (!filePath) throw new Error('filePath is required');
+    assertFunction(mailDeps.uploadAndAttach, 'mail.uploadAndAttach dependency missing');
+    const result = await mailDeps.uploadAndAttach({ messageId, filePath, contentType });
+    return {
+      status: 'attached',
+      attachmentId: result && result.attachmentId,
+    };
+  };
+
+  handlers['calendar.events.list'] = async ({ startDateTime, endDateTime, calendarId } = {}) => {
+    if (!startDateTime || !endDateTime) throw new Error('startDateTime and endDateTime are required');
+    assertFunction(calendarDeps.listEvents, 'calendar.listEvents dependency missing');
+    const result = await calendarDeps.listEvents({ startDateTime, endDateTime, calendarId });
+    return { events: (result && result.events) || result || [] };
+  };
+
+  handlers['calendar.event.createOrUpdate'] = async ({ eventId, subject, body, start, end, attendees, location } = {}) => {
+    if (!subject) throw new Error('subject is required');
+    if (!start || !end) throw new Error('start and end are required');
+    assertFunction(calendarDeps.createOrUpdateEvent, 'calendar.createOrUpdateEvent dependency missing');
+    const result = await calendarDeps.createOrUpdateEvent({ eventId, subject, body, start, end, attendees, location });
+    const status = eventId ? 'updated' : 'created';
+    return {
+      status,
+      eventId: (result && result.eventId) || result || eventId,
+    };
+  };
+
+  handlers['calendar.event.cancel'] = async ({ eventId, comment } = {}) => {
+    if (!eventId) throw new Error('eventId is required');
+    assertFunction(calendarDeps.cancelEvent, 'calendar.cancelEvent dependency missing');
+    await calendarDeps.cancelEvent({ eventId, comment });
+    return { status: 'cancelled', eventId };
+  };
+
+  handlers['drive.file.upload'] = async ({ sourcePath, drivePath, conflictBehavior = 'replace' } = {}) => {
+    if (!sourcePath) throw new Error('sourcePath is required');
+    if (!drivePath) throw new Error('drivePath is required');
+    assertFunction(driveDeps.uploadFile, 'drive.uploadFile dependency missing');
+    const result = await driveDeps.uploadFile({ sourcePath, drivePath, conflictBehavior });
+    return {
+      status: 'uploaded',
+      driveItemId: result && result.driveItemId,
+    };
+  };
+
+  handlers['excel.workbook.listSheets'] = async ({ driveItemId, workbookSession } = {}) => {
+    if (!driveItemId) throw new Error('driveItemId is required');
+    if (!workbookSession) throw new Error('workbookSession is required');
+    assertFunction(excelDeps.listSheets, 'excel.listSheets dependency missing');
+    const result = await excelDeps.listSheets({ driveItemId, workbookSession });
+    return { sheets: (result && result.sheets) || result || [] };
+  };
+
+  handlers['excel.workbook.readRange'] = async ({
+    driveItemId,
+    workbookSession,
+    sheetName,
+    range,
+    valuesOnly = true,
+    preferValues = false,
+  } = {}) => {
+    if (!driveItemId) throw new Error('driveItemId is required');
+    if (!workbookSession) throw new Error('workbookSession is required');
+    assertFunction(excelDeps.readRange, 'excel.readRange dependency missing');
+    const result = await excelDeps.readRange({ driveItemId, workbookSession, sheetName, range, valuesOnly, preferValues });
+    if (!result) return { address: undefined, values: [] };
+    return {
+      address: result.address,
+      values: result.values,
+    };
+  };
+
+  handlers['excel.workbook.updateRange'] = async ({
+    driveItemId,
+    workbookSession,
+    sheetName,
+    range,
+    values,
+    matchExpected,
+  } = {}) => {
+    if (!driveItemId) throw new Error('driveItemId is required');
+    if (!workbookSession) throw new Error('workbookSession is required');
+    if (!sheetName) throw new Error('sheetName is required');
+    if (!range) throw new Error('range is required');
+    if (!Array.isArray(values)) throw new Error('values must be an array of rows');
+    assertFunction(excelDeps.updateRange, 'excel.updateRange dependency missing');
+    const result = await excelDeps.updateRange({ driveItemId, workbookSession, sheetName, range, values, matchExpected });
+    return {
+      status: 'updated',
+      modifiedRange: result && result.modifiedRange ? result.modifiedRange : range,
+    };
+  };
+
+  handlers['graph.health.check'] = async ({ pingEndpoint } = {}) => {
+    assertFunction(graphDeps.healthCheck, 'graph.healthCheck dependency missing');
+    return graphDeps.healthCheck({ pingEndpoint });
+  };
+
+  handlers['graph.token.acquire'] = async ({ scopeSet } = {}) => {
+    if (!Array.isArray(scopeSet) || scopeSet.length === 0) throw new Error('scopeSet must contain at least one scope');
+    assertFunction(graphDeps.acquireToken, 'graph.acquireToken dependency missing');
+    const result = await graphDeps.acquireToken({ scopeSet });
+    return {
+      status: 'acquired',
+      expiresOn: result && result.expiresOn,
+    };
+  };
+
+  handlers['tooling.feature.toggle'] = async ({ feature, enabled, context } = {}) => {
+    if (!feature) throw new Error('feature is required');
+    if (typeof enabled !== 'boolean') throw new Error('enabled flag must be boolean');
+    assertFunction(toolingDeps.updateFeatureToggle, 'tooling.updateFeatureToggle dependency missing');
+    const result = await toolingDeps.updateFeatureToggle({ feature, enabled, context });
+    return {
+      status: 'updated',
+      feature,
+      enabled,
+      context,
+      updatedAt: result && result.updatedAt,
+    };
+  };
+
+  // Ensure handlers cover every manifest tool to keep runtime alignment
+  for (const tool of manifest.tools) {
+    if (!handlers[tool.name]) {
+      throw new Error(`Missing handler implementation for ${tool.name}`);
+    }
+  }
+
+  return handlers;
+}
+
+module.exports = { createM365ToolHandlers };
+</file>
+
+<file path="agent/mcp-m365-tools.spec.js">
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+function loadFactory() {
+  return require('./mcp-m365-tools').createM365ToolHandlers;
+}
+
+test('creates handlers that align with manifest tool names', () => {
+  const createM365ToolHandlers = loadFactory();
+  const manifest = require('./mcp-tool-manifest').createM365ToolManifest();
+  const handlers = createM365ToolHandlers({
+    mail: {}, calendar: {}, drive: {}, excel: {}, graph: {}, tooling: {}
+  });
+  const handlerNames = Object.keys(handlers).sort();
+  const manifestNames = manifest.tools.map((tool) => tool.name).sort();
+  assert.deepEqual(handlerNames, manifestNames);
+});
+
+test('mail.latestMessage.get delegates to dependency and normalises output', async () => {
+  const createM365ToolHandlers = loadFactory();
+  let receivedArgs;
+  const handlers = createM365ToolHandlers({
+    mail: {
+      async getLatestMessage(args) {
+        receivedArgs = args;
+        return {
+          id: '123',
+          subject: 'Test',
+          receivedDateTime: '2024-12-01T10:00:00Z',
+          from: { emailAddress: { address: 'sender@example.com' } },
+          webLink: 'https://outlook.office.com/foo',
+          bodyPreview: 'Hello'
+        };
+      }
+    },
+    calendar: {}, drive: {}, excel: {}, graph: {}, tooling: {}
+  });
+  const result = await handlers['mail.latestMessage.get']({ folderId: 'Inbox' });
+  assert.equal(receivedArgs.folderId, 'Inbox');
+  assert.deepEqual(result, {
+    messageId: '123',
+    subject: 'Test',
+    receivedDateTime: '2024-12-01T10:00:00Z',
+    from: 'sender@example.com',
+    webLink: 'https://outlook.office.com/foo',
+    bodyPreview: 'Hello'
+  });
+});
+
+test('mail.message.replyDraft composes create, patch and send operations', async () => {
+  const createM365ToolHandlers = loadFactory();
+  const calls = [];
+  const handlers = createM365ToolHandlers({
+    mail: {
+      async createReplyDraft({ messageId }) {
+        calls.push(['createReplyDraft', { messageId }]);
+        return { draftId: 'draft-1', etag: 'etag-1' };
+      },
+      async patchDraftBody({ draftId, body, contentType, etag, preferHeaders }) {
+        calls.push(['patchDraftBody', { draftId, body, contentType, etag, preferHeaders }]);
+        return { etag: 'etag-2' };
+      },
+      async sendDraft({ draftId, saveToSentItems, preferHeaders }) {
+        calls.push(['sendDraft', { draftId, saveToSentItems, preferHeaders }]);
+        return { internetMessageId: '<message-id@example.com>' };
+      }
+    },
+    calendar: {}, drive: {}, excel: {}, graph: {}, tooling: {}
+  });
+  const output = await handlers['mail.message.replyDraft']({
+    messageId: 'abc',
+    body: 'Antwortinhalt',
+    contentType: 'Text',
+    preferHeaders: ['return=representation'],
+    saveToSentItems: false
+  });
+  assert.deepEqual(calls, [
+    ['createReplyDraft', { messageId: 'abc' }],
+    ['patchDraftBody', {
+      draftId: 'draft-1',
+      body: 'Antwortinhalt',
+      contentType: 'Text',
+      etag: 'etag-1',
+      preferHeaders: ['return=representation']
+    }],
+    ['sendDraft', {
+      draftId: 'draft-1',
+      saveToSentItems: false,
+      preferHeaders: ['return=representation']
+    }]
+  ]);
+  assert.deepEqual(output, {
+    status: 'sent',
+    draftId: 'draft-1',
+    etag: 'etag-2'
+  });
+});
+
+test('excel.workbook.readRange forwards defaults and returns structured values', async () => {
+  const createM365ToolHandlers = loadFactory();
+  let received;
+  const handlers = createM365ToolHandlers({
+    mail: {}, calendar: {}, drive: {},
+    excel: {
+      async readRange(args) {
+        received = args;
+        return {
+          address: "Tabelle1!A1:B2",
+          values: [["A", "B"], ["C", "D"]]
+        };
+      }
+    },
+    graph: {}, tooling: {}
+  });
+  const result = await handlers['excel.workbook.readRange']({
+    driveItemId: 'drive-1',
+    workbookSession: 'session-xyz',
+    sheetName: 'Tabelle1'
+  });
+  assert.deepEqual(received, {
+    driveItemId: 'drive-1',
+    workbookSession: 'session-xyz',
+    sheetName: 'Tabelle1',
+    range: undefined,
+    valuesOnly: true,
+    preferValues: false
+  });
+  assert.deepEqual(result, {
+    address: 'Tabelle1!A1:B2',
+    values: [["A", "B"], ["C", "D"]]
+  });
+});
+
+test('graph.health.check bubbles dependency output', async () => {
+  const createM365ToolHandlers = loadFactory();
+  const handlers = createM365ToolHandlers({
+    mail: {}, calendar: {}, drive: {}, excel: {},
+    graph: {
+      async healthCheck({ pingEndpoint }) {
+        return { status: 'healthy', latencyMs: 50, pingEndpoint };
+      }
+    },
+    tooling: {}
+  });
+  const result = await handlers['graph.health.check']({ pingEndpoint: 'https://graph.microsoft.com/v1.0/me' });
+  assert.deepEqual(result, { status: 'healthy', latencyMs: 50, pingEndpoint: 'https://graph.microsoft.com/v1.0/me' });
+});
+
+test('tooling.feature.toggle delegates and ensures deterministic response', async () => {
+  const createM365ToolHandlers = loadFactory();
+  const handlers = createM365ToolHandlers({
+    mail: {}, calendar: {}, drive: {}, excel: {}, graph: {},
+    tooling: {
+      async updateFeatureToggle({ feature, enabled, context }) {
+        return { feature, enabled, context, updatedAt: 'now' };
+      }
+    }
+  });
+  const result = await handlers['tooling.feature.toggle']({ feature: 'mcp', enabled: true, context: { actor: 'test' } });
+  assert.deepEqual(result, { status: 'updated', feature: 'mcp', enabled: true, context: { actor: 'test' }, updatedAt: 'now' });
+});
+</file>
+
+<file path="agent/mcp-tool-manifest.js">
+const manifestVersion = '0.1.0';
+
+function clone(value) {
+  if (typeof globalThis.structuredClone === 'function') {
+    return globalThis.structuredClone(value);
+  }
+  return JSON.parse(JSON.stringify(value));
+}
+
+const toolDefinitions = [
+  {
+    name: 'mail.latestMessage.get',
+    description: 'Liest deterministisch die neueste Nachricht aus einem Mailordner und liefert Metadaten.',
+    inputSchema: {
+      type: 'object',
+      required: ['folderId'],
+      properties: {
+        folderId: { type: 'string', description: 'ID oder bekannter Name des Zielordners, z. B. inbox.' },
+        select: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optionale Microsoft Graph $select Felder zur Optimierung.'
+        },
+        includeBodyPreview: {
+          type: 'boolean',
+          default: false,
+          description: 'Steuert, ob die Body-Vorschau geladen werden soll.'
+        }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        messageId: { type: 'string' },
+        subject: { type: 'string' },
+        receivedDateTime: { type: 'string' },
+        from: { type: 'string' },
+        webLink: { type: 'string' }
+      }
+    },
+    metadata: {
+      category: 'mail',
+      deterministic: true,
+      scopes: ['Mail.Read'],
+      resource: 'https://graph.microsoft.com/v1.0/me/mailFolders/{folderId}/messages'
+    }
+  },
+  {
+    name: 'mail.message.fetch',
+    description: 'Liest eine Nachricht anhand ihrer ID inklusive Body und Debug-Headern.',
+    inputSchema: {
+      type: 'object',
+      required: ['messageId'],
+      properties: {
+        messageId: { type: 'string', description: 'Graph-Nachrichten-ID für den Abruf.' },
+        preferTextBody: {
+          type: 'boolean',
+          default: true,
+          description: 'Verwendet Prefer: outlook.body-content-type="text" wenn true.'
+        },
+        expandAttachments: {
+          type: 'boolean',
+          default: false,
+          description: 'Steuert, ob Anhänge sofort mitgeladen werden.'
+        }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        messageId: { type: 'string' },
+        subject: { type: 'string' },
+        body: { type: 'string' },
+        headers: { type: 'array', items: { type: 'object' } }
+      }
+    },
+    metadata: {
+      category: 'mail',
+      deterministic: true,
+      scopes: ['Mail.Read'],
+      resource: 'https://graph.microsoft.com/v1.0/me/messages/{messageId}'
+    }
+  },
+  {
+    name: 'mail.message.replyDraft',
+    description: 'Erstellt einen Reply-Draft, patcht den Body deterministisch und sendet ihn mit SaveToSentItems Option.',
+    inputSchema: {
+      type: 'object',
+      required: ['messageId', 'body'],
+      properties: {
+        messageId: { type: 'string', description: 'ID der Originalnachricht, die beantwortet wird.' },
+        body: { type: 'string', description: 'Antworttext oder HTML-Body.' },
+        contentType: {
+          type: 'string',
+          enum: ['Text', 'HTML'],
+          default: 'Text',
+          description: 'ContentType für den Patch-Schritt (Text empfohlen laut Troubleshooting-Doku).'
+        },
+        preferHeaders: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Zusätzliche Prefer-Header (z. B. return=representation).'
+        },
+        saveToSentItems: {
+          type: 'boolean',
+          default: true,
+          description: 'Ob der Draft-Send in Gesendete Objekte gespeichert wird.'
+        }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['sent'] },
+        draftId: { type: 'string' },
+        etag: { type: 'string' }
+      }
+    },
+    metadata: {
+      category: 'mail',
+      deterministic: true,
+      scopes: ['Mail.ReadWrite', 'Mail.Send'],
+      resource: 'https://graph.microsoft.com/v1.0/me/messages/{messageId}/reply'
+    }
+  },
+  {
+    name: 'mail.message.send',
+    description: 'Sendet eine neue Nachricht oder Quasi-Reply mit expliziten Internet-Headern und Anhängen.',
+    inputSchema: {
+      type: 'object',
+      required: ['subject', 'body', 'to'],
+      properties: {
+        subject: { type: 'string', description: 'Betreff der Nachricht.' },
+        body: { type: 'string', description: 'Body-Inhalt als Text oder HTML.' },
+        to: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Liste der Empfänger (UPN oder SMTP).'
+        },
+        bodyContentType: {
+          type: 'string',
+          enum: ['Text', 'HTML'],
+          default: 'Text'
+        },
+        internetHeaders: {
+          type: 'object',
+          additionalProperties: { type: 'string' },
+          description: 'Zusätzliche Internet-Header wie In-Reply-To für Threading.'
+        },
+        attachments: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['name', 'path'],
+            properties: {
+              name: { type: 'string' },
+              path: { type: 'string' }
+            }
+          }
+        },
+        saveToSentItems: { type: 'boolean', default: true }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['sent'] },
+        internetMessageId: { type: 'string' }
+      }
+    },
+    metadata: {
+      category: 'mail',
+      deterministic: true,
+      scopes: ['Mail.Send'],
+      resource: 'https://graph.microsoft.com/v1.0/me/sendMail'
+    }
+  },
+  {
+    name: 'mail.attachment.download',
+    description: 'Lädt einen bestimmten Anhang einer Nachricht und speichert ihn deterministisch im Zielpfad.',
+    inputSchema: {
+      type: 'object',
+      required: ['messageId', 'attachmentId', 'targetPath'],
+      properties: {
+        messageId: { type: 'string' },
+        attachmentId: { type: 'string' },
+        targetPath: { type: 'string', description: 'Ablageort für den heruntergeladenen Anhang.' }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['saved'] },
+        filePath: { type: 'string' }
+      }
+    },
+    metadata: {
+      category: 'mail',
+      deterministic: true,
+      scopes: ['Mail.Read'],
+      resource: 'https://graph.microsoft.com/v1.0/me/messages/{messageId}/attachments/{attachmentId}'
+    }
+  },
+  {
+    name: 'mail.attachment.uploadAndAttach',
+    description: 'Lädt eine lokale Datei hoch und hängt sie an eine bestehende oder neue Nachricht an.',
+    inputSchema: {
+      type: 'object',
+      required: ['messageId', 'filePath'],
+      properties: {
+        messageId: { type: 'string' },
+        filePath: { type: 'string' },
+        contentType: { type: 'string', description: 'Explorer MIME Type, falls bekannt.' }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['attached'] },
+        attachmentId: { type: 'string' }
+      }
+    },
+    metadata: {
+      category: 'mail',
+      deterministic: true,
+      scopes: ['Mail.ReadWrite'],
+      resource: 'https://graph.microsoft.com/v1.0/me/messages/{messageId}/attachments'
+    }
+  },
+  {
+    name: 'calendar.events.list',
+    description: 'Listet Kalenderereignisse in einem Zeitraum mit deterministischer Filterung.',
+    inputSchema: {
+      type: 'object',
+      required: ['startDateTime', 'endDateTime'],
+      properties: {
+        startDateTime: { type: 'string', description: 'IS0-8601 Startzeitpunkt.' },
+        endDateTime: { type: 'string', description: 'IS0-8601 Endzeitpunkt.' },
+        calendarId: { type: 'string', description: 'Optionaler Zielkalender, Standard ist primary.' }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        events: { type: 'array', items: { type: 'object' } }
+      }
+    },
+    metadata: {
+      category: 'calendar',
+      deterministic: true,
+      scopes: ['Calendars.Read'],
+      resource: 'https://graph.microsoft.com/v1.0/me/calendarview'
+    }
+  },
+  {
+    name: 'calendar.event.createOrUpdate',
+    description: 'Erstellt oder aktualisiert ein Ereignis mit klaren Start-/Endzeiten und Teilnehmern.',
+    inputSchema: {
+      type: 'object',
+      required: ['subject', 'start', 'end'],
+      properties: {
+        eventId: { type: 'string', description: 'Optional vorhandene Event-ID für Update.' },
+        subject: { type: 'string' },
+        body: { type: 'string' },
+        start: { type: 'string' },
+        end: { type: 'string' },
+        attendees: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Liste der Teilnehmer-Adressen.'
+        },
+        location: { type: 'string' }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['created', 'updated'] },
+        eventId: { type: 'string' }
+      }
+    },
+    metadata: {
+      category: 'calendar',
+      deterministic: true,
+      scopes: ['Calendars.ReadWrite'],
+      resource: 'https://graph.microsoft.com/v1.0/me/events'
+    }
+  },
+  {
+    name: 'calendar.event.cancel',
+    description: 'Sagt ein Ereignis deterministisch mit optionaler Begründung ab.',
+    inputSchema: {
+      type: 'object',
+      required: ['eventId', 'comment'],
+      properties: {
+        eventId: { type: 'string' },
+        comment: { type: 'string', description: 'Optionale Nachricht an Teilnehmer.' }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['cancelled'] },
+        eventId: { type: 'string' }
+      }
+    },
+    metadata: {
+      category: 'calendar',
+      deterministic: true,
+      scopes: ['Calendars.ReadWrite'],
+      resource: 'https://graph.microsoft.com/v1.0/me/events/{eventId}/cancel'
+    }
+  },
+  {
+    name: 'drive.file.upload',
+    description: 'Lädt eine lokale Datei nach OneDrive hoch und gibt den DriveItem-Bezug zurück.',
+    inputSchema: {
+      type: 'object',
+      required: ['sourcePath', 'drivePath'],
+      properties: {
+        sourcePath: { type: 'string' },
+        drivePath: { type: 'string', description: 'Zielpfad in der Dokumentbibliothek.' },
+        conflictBehavior: {
+          type: 'string',
+          enum: ['replace', 'fail', 'rename'],
+          default: 'replace'
+        }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['uploaded'] },
+        driveItemId: { type: 'string' }
+      }
+    },
+    metadata: {
+      category: 'drive',
+      deterministic: true,
+      scopes: ['Files.ReadWrite.All'],
+      resource: 'https://graph.microsoft.com/v1.0/me/drive/root:{drivePath}:/content'
+    }
+  },
+  {
+    name: 'excel.workbook.listSheets',
+    description: 'Listet Arbeitsblattnamen in einem Workbook über die Graph Excel API.',
+    inputSchema: {
+      type: 'object',
+      required: ['driveItemId', 'workbookSession'],
+      properties: {
+        driveItemId: { type: 'string' },
+        workbookSession: { type: 'string', description: 'Graph Workbook Session ID für deterministische Zugriffe.' }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        sheets: { type: 'array', items: { type: 'string' } }
+      }
+    },
+    metadata: {
+      category: 'excel',
+      deterministic: true,
+      scopes: ['Files.ReadWrite.All'],
+      resource: 'https://graph.microsoft.com/v1.0/me/drive/items/{driveItemId}/workbook/worksheets'
+    }
+  },
+  {
+    name: 'excel.workbook.readRange',
+    description: 'Liest deterministisch Werte aus einem Workbook-Bereich, optional über usedRange.',
+    inputSchema: {
+      type: 'object',
+      required: ['driveItemId', 'workbookSession'],
+      properties: {
+        driveItemId: { type: 'string' },
+        workbookSession: { type: 'string', description: 'Workbook Session für konsistente Ergebnisse.' },
+        sheetName: { type: 'string', description: 'Name des Arbeitsblatts.' },
+        range: { type: 'string', description: 'Optionaler Bereich, z. B. A1:D20.' },
+        valuesOnly: { type: 'boolean', default: true, description: 'Gibt nur Werte zurück (wie usedRange(valuesOnly=true)).' },
+        preferValues: { type: 'boolean', default: false, description: 'Setzt Prefer-Header für ValueOnly.' }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        values: { type: 'array', items: { type: 'array', items: { type: ['string', 'number', 'null'] } } },
+        address: { type: 'string' }
+      }
+    },
+    metadata: {
+      category: 'excel',
+      deterministic: true,
+      scopes: ['Files.ReadWrite.All'],
+      resource: 'https://graph.microsoft.com/v1.0/me/drive/items/{driveItemId}/workbook/worksheets/{sheetName}'
+    }
+  },
+  {
+    name: 'excel.workbook.updateRange',
+    description: 'Schreibt Werte in einen definierten Workbook-Bereich mit optionalem Wertevergleich.',
+    inputSchema: {
+      type: 'object',
+      required: ['driveItemId', 'workbookSession', 'sheetName', 'range', 'values'],
+      properties: {
+        driveItemId: { type: 'string' },
+        workbookSession: { type: 'string' },
+        sheetName: { type: 'string' },
+        range: { type: 'string' },
+        values: {
+          type: 'array',
+          items: { type: 'array', items: { type: ['string', 'number', 'null'] } }
+        },
+        matchExpected: {
+          type: 'array',
+          items: { type: 'array', items: { type: ['string', 'number', 'null'] } },
+          description: 'Optionaler Sollwert zum Patchen bei Optimistic Concurrency.'
+        }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['updated'] },
+        modifiedRange: { type: 'string' }
+      }
+    },
+    metadata: {
+      category: 'excel',
+      deterministic: true,
+      scopes: ['Files.ReadWrite.All'],
+      resource: 'https://graph.microsoft.com/v1.0/me/drive/items/{driveItemId}/workbook/worksheets/{sheetName}/range(address={range})'
+    }
+  },
+  {
+    name: 'graph.health.check',
+    description: 'Prüft Token-Gültigkeit, Tenant und grundlegende Konnektivität zur Graph API.',
+    inputSchema: {
+      type: 'object',
+      required: [],
+      properties: {
+        pingEndpoint: { type: 'string', default: 'https://graph.microsoft.com/v1.0/me' }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['healthy', 'degraded'] },
+        latencyMs: { type: 'number' }
+      }
+    },
+    metadata: {
+      category: 'graph',
+      deterministic: true,
+      scopes: ['User.Read'],
+      resource: 'https://graph.microsoft.com/v1.0'
+    }
+  },
+  {
+    name: 'graph.token.acquire',
+    description: 'Erzwingt den Erwerb eines Access Tokens und liefert Ablaufinformationen.',
+    inputSchema: {
+      type: 'object',
+      required: ['scopeSet'],
+      properties: {
+        scopeSet: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Scopes, die für den Token erforderlich sind.'
+        }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['acquired'] },
+        expiresOn: { type: 'string' }
+      }
+    },
+    metadata: {
+      category: 'graph',
+      deterministic: true,
+      scopes: [],
+      resource: 'https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token'
+    }
+  },
+  {
+    name: 'tooling.feature.toggle',
+    description: 'Aktiviert oder deaktiviert deterministisch eine Funktion (z. B. MCP vs CLI Fallback).',
+    inputSchema: {
+      type: 'object',
+      required: ['feature', 'enabled'],
+      properties: {
+        feature: { type: 'string' },
+        enabled: { type: 'boolean' },
+        context: { type: 'object', additionalProperties: true }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['updated'] },
+        feature: { type: 'string' }
+      }
+    },
+    metadata: {
+      category: 'tooling',
+      deterministic: true,
+      scopes: [],
+      resource: 'internal-policy://feature-toggle'
+    }
+  }
+];
+
+function createM365ToolManifest() {
+  return {
+    namespace: 'm365',
+    version: manifestVersion,
+    tools: toolDefinitions.map((tool) => clone(tool))
+  };
+}
+
+module.exports = { createM365ToolManifest };
+</file>
+
+<file path="agent/mcp-tool-manifest.spec.js">
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+function loadFactory() {
+  return require('./mcp-tool-manifest').createM365ToolManifest;
+}
+
+test('manifest enumerates the expected M365 tool names exactly once', () => {
+  const createM365ToolManifest = loadFactory();
+  const manifest = createM365ToolManifest();
+  assert.equal(manifest.namespace, 'm365');
+  assert.match(manifest.version, /^0\.\d+\.\d+$/);
+  const toolNames = manifest.tools.map((tool) => tool.name);
+  const expected = [
+    'mail.latestMessage.get',
+    'mail.message.fetch',
+    'mail.message.replyDraft',
+    'mail.message.send',
+    'mail.attachment.download',
+    'mail.attachment.uploadAndAttach',
+    'calendar.events.list',
+    'calendar.event.createOrUpdate',
+    'calendar.event.cancel',
+    'drive.file.upload',
+    'excel.workbook.listSheets',
+    'excel.workbook.readRange',
+    'excel.workbook.updateRange',
+    'graph.health.check',
+    'graph.token.acquire',
+    'tooling.feature.toggle',
+  ];
+  assert.deepEqual(toolNames.sort(), [...new Set(toolNames)].sort(), 'tool names must be unique');
+  for (const name of expected) {
+    assert.ok(toolNames.includes(name), `manifest is missing tool ${name}`);
+  }
+});
+
+test('replyDraft tool schema requires messageId and body with deterministic defaults', () => {
+  const createM365ToolManifest = loadFactory();
+  const manifest = createM365ToolManifest();
+  const replyDraft = manifest.tools.find((tool) => tool.name === 'mail.message.replyDraft');
+  assert.ok(replyDraft, 'mail.message.replyDraft tool not found');
+  assert.equal(replyDraft.metadata.category, 'mail');
+  assert.equal(replyDraft.metadata.deterministic, true);
+  assert.deepEqual(replyDraft.metadata.scopes, ['Mail.ReadWrite', 'Mail.Send']);
+  const { inputSchema } = replyDraft;
+  assert.ok(inputSchema, 'replyDraft input schema missing');
+  assert.deepEqual(inputSchema.type, 'object');
+  assert.ok(Array.isArray(inputSchema.required), 'replyDraft required array missing');
+  assert.ok(inputSchema.required.includes('messageId'));
+  assert.ok(inputSchema.required.includes('body'));
+  assert.deepEqual(Object.keys(inputSchema.properties), [
+    'messageId',
+    'body',
+    'contentType',
+    'preferHeaders',
+    'saveToSentItems',
+  ]);
+  assert.equal(inputSchema.properties.messageId.type, 'string');
+  assert.equal(inputSchema.properties.body.type, 'string');
+  assert.equal(inputSchema.properties.contentType.enum[0], 'Text');
+  assert.equal(replyDraft.outputSchema.properties.status.enum[0], 'sent');
+});
+
+test('excel read range schema surfaces sheetName and range controls', () => {
+  const createM365ToolManifest = loadFactory();
+  const manifest = createM365ToolManifest();
+  const readRange = manifest.tools.find((tool) => tool.name === 'excel.workbook.readRange');
+  assert.ok(readRange, 'excel.workbook.readRange tool not found');
+  assert.equal(readRange.metadata.category, 'excel');
+  assert.deepEqual(readRange.metadata.scopes, ['Files.ReadWrite.All']);
+  const { inputSchema } = readRange;
+  assert.equal(inputSchema.type, 'object');
+  assert.ok(inputSchema.required.includes('driveItemId'));
+  assert.ok(inputSchema.required.includes('workbookSession')); // ensures deterministic session handling
+  assert.ok(Object.prototype.hasOwnProperty.call(inputSchema.properties, 'sheetName'));
+  assert.ok(Object.prototype.hasOwnProperty.call(inputSchema.properties, 'range'));
+  assert.ok(Object.prototype.hasOwnProperty.call(inputSchema.properties, 'valuesOnly'));
+  assert.equal(inputSchema.properties.valuesOnly.type, 'boolean');
+  assert.deepEqual(readRange.outputSchema.properties.values.type, 'array');
+});
+
+test('every tool declares deterministic metadata and scopes array', () => {
+  const createM365ToolManifest = loadFactory();
+  const manifest = createM365ToolManifest();
+  for (const tool of manifest.tools) {
+    assert.equal(tool.metadata.deterministic, true, `${tool.name} must be deterministic`);
+    assert.ok(Array.isArray(tool.metadata.scopes), `${tool.name} metadata.scopes must be an array`);
+    assert.ok(tool.description && tool.description.length > 10, `${tool.name} needs a helpful description`);
+  }
+});
+</file>
+
+<file path="agent/mcp-tool-registry.js">
+const { jsonSchemaToZod } = require('./mcp-jsonschema');
+
+function createInProcessToolDefinitions({ manifest, callTool, z }) {
+  if (!manifest || typeof manifest !== 'object') {
+    throw new Error('manifest is required');
+  }
+  if (!Array.isArray(manifest.tools)) {
+    throw new Error('manifest.tools must be an array');
+  }
+  if (typeof callTool !== 'function') {
+    throw new Error('callTool function is required');
+  }
+  if (!z || typeof z !== 'object') {
+    throw new Error('zod export is required');
+  }
+
+  return manifest.tools.map((tool) => {
+    const inputSchema = tool.inputSchema || { type: 'object', properties: {} };
+    const zodSchema = jsonSchemaToZod(inputSchema, z);
+    const invoke = async (args) => callTool({ name: tool.name, args });
+    return {
+      name: tool.name,
+      description: tool.description,
+      manifest: tool,
+      zodSchema,
+      metadata: tool.metadata || {},
+      invoke,
+    };
+  });
+}
+
+module.exports = { createInProcessToolDefinitions };
+</file>
+
+<file path="agent/mcp-tool-registry.spec.js">
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { z } = require('zod');
+
+const { createInProcessToolDefinitions } = require('./mcp-tool-registry');
+const { createM365ToolManifest } = require('./mcp-tool-manifest');
+
+test('builder returns descriptors for manifest tools', () => {
+  const manifest = createM365ToolManifest();
+  const descriptors = createInProcessToolDefinitions({
+    manifest,
+    callTool: async () => ({}),
+    z,
+  });
+  const names = descriptors.map((d) => d.name);
+  assert.ok(names.includes('mail.message.replyDraft'));
+  const reply = descriptors.find((d) => d.name === 'mail.message.replyDraft');
+  assert.equal(reply.metadata.category, 'mail');
+  assert.equal(typeof reply.invoke, 'function');
+  assert.equal(typeof reply.zodSchema.parse, 'function');
+});
+
+test('descriptor invoke delegates to callTool with provided arguments', async () => {
+  const manifest = createM365ToolManifest();
+  const calls = [];
+  const descriptors = createInProcessToolDefinitions({
+    manifest,
+    callTool: async ({ name, args }) => {
+      calls.push({ name, args });
+      return { ok: true };
+    },
+    z,
+  });
+  const tool = descriptors.find((d) => d.name === 'mail.latestMessage.get');
+  await tool.invoke({ folderId: 'Inbox' });
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], { name: 'mail.latestMessage.get', args: { folderId: 'Inbox' } });
+});
+
+test('zod schema enforces required fields from JSON schema', () => {
+  const manifest = createM365ToolManifest();
+  const descriptors = createInProcessToolDefinitions({ manifest, callTool: async () => ({}), z });
+  const reply = descriptors.find((d) => d.name === 'mail.message.replyDraft');
+  assert.throws(() => reply.zodSchema.parse({ body: 'Test' }), /Required/);
+  const parsed = reply.zodSchema.parse({ messageId: '123', body: 'Test' });
+  assert.equal(parsed.messageId, '123');
+});
+</file>
+
+<file path="chat-provider.js">
+'use strict';
+
+const DEFAULT_TEMP = 0.3;
+const DEFAULT_PROVIDER = 'azure';
+const DEFAULT_OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
+
+function parseTemperature(raw) {
+  if (raw == null) return DEFAULT_TEMP;
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric)) return numeric;
+  return DEFAULT_TEMP;
+}
+
+function parseOptionalNumber(raw) {
+  if (raw == null || raw === '') return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function normalizeMessages(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return [{ role: 'user', content: '' }];
+  }
+  return messages.map(msg => {
+    const role = typeof msg?.role === 'string' ? msg.role : 'user';
+    const content = msg?.content;
+    if (typeof content === 'string') {
+      return { role, content };
+    }
+    if (Array.isArray(content)) {
+      const joined = content.map(part => {
+        if (typeof part === 'string') return part;
+        if (part && typeof part.text === 'string') return part.text;
+        if (part && typeof part.value === 'string') return part.value;
+        return '';
+      }).join('');
+      return { role, content: joined };
+    }
+    if (content && typeof content.text === 'string') {
+      return { role, content: content.text };
+    }
+    return { role, content: content == null ? '' : String(content) };
+  });
+}
+
+function extractTextContent(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.map(part => {
+      if (typeof part === 'string') return part;
+      if (part && typeof part.text === 'string') return part.text;
+      if (part && typeof part.value === 'string') return part.value;
+      return '';
+    }).join('');
+  }
+  if (content && typeof content.text === 'string') return content.text;
+  if (content && typeof content.value === 'string') return content.value;
+  return content == null ? '' : String(content);
+}
+
+async function createChatProvider(options = {}) {
+  const providerEnv = options.provider || process.env.AI_PROVIDER || DEFAULT_PROVIDER;
+  const provider = String(providerEnv || DEFAULT_PROVIDER).toLowerCase();
+  const temperature = parseTemperature(options.temperature != null ? options.temperature : process.env.AI_TEMPERATURE);
+  const maxCompletionTokens = parseOptionalNumber(
+    options.maxCompletionTokens != null ? options.maxCompletionTokens : process.env.AI_MAX_COMPLETION_TOKENS
+  );
+  if (provider === 'openrouter') {
+    const apiKey = options.apiKey || process.env.OPENROUTER_API_KEY;
+    if (!apiKey) {
+      throw Object.assign(new Error('OPENROUTER_API_KEY is not configured'), { provider });
+    }
+    const modelName = options.modelName
+      || process.env.OPENROUTER_MODEL_NAME
+      || process.env.AI_MODEL_NAME
+      || 'openai/gpt-4o-mini';
+    const baseURL = options.baseURL || process.env.OPENROUTER_BASE_URL || DEFAULT_OPENROUTER_BASE_URL;
+    const headers = {};
+    const referer = options.referer || process.env.OPENROUTER_HTTP_REFERER;
+    const title = options.appTitle || process.env.OPENROUTER_APP_TITLE;
+    if (referer) headers['HTTP-Referer'] = referer;
+    if (title) headers['X-Title'] = title;
+
+    const OpenAI = require('openai');
+    const openaiClient = new OpenAI({
+      apiKey,
+      baseURL,
+      defaultHeaders: Object.keys(headers).length ? headers : undefined
+    });
+    const { ChatOpenAI } = await import('@langchain/openai');
+    const langchainModel = new ChatOpenAI({
+      model: modelName,
+      temperature,
+      apiKey,
+      maxCompletionTokens,
+      configuration: {
+        baseURL,
+        defaultHeaders: Object.keys(headers).length ? headers : undefined
+      }
+    });
+
+    return {
+      provider,
+      modelName,
+      temperature,
+      langchain: langchainModel,
+      async *stream(messages) {
+        const normalized = normalizeMessages(messages);
+        const response = await openaiClient.chat.completions.create({
+          model: modelName,
+          messages: normalized,
+          temperature,
+          max_tokens: maxCompletionTokens,
+          stream: true
+        });
+        for await (const part of response) {
+          const piece = part?.choices?.[0]?.delta?.content;
+          if (piece) yield piece;
+        }
+      },
+      async complete(messages) {
+        const normalized = normalizeMessages(messages);
+        const result = await openaiClient.chat.completions.create({
+          model: modelName,
+          messages: normalized,
+          temperature,
+          max_tokens: maxCompletionTokens
+        });
+        return result?.choices?.[0]?.message?.content || '';
+      }
+    };
+  }
+
+  const destinationName = options.destinationName || process.env.AI_DESTINATION_NAME || 'aicore-destination';
+  const modelName = options.modelName || process.env.AI_MODEL_NAME || 'gpt-4.1';
+  const { AzureOpenAiChatClient } = await import('@sap-ai-sdk/langchain');
+  const azureConfig = { modelName, temperature };
+  if (maxCompletionTokens !== undefined) {
+    azureConfig.maxCompletionTokens = maxCompletionTokens;
+  }
+  const azureClient = new AzureOpenAiChatClient(azureConfig, { destinationName });
+
+  return {
+    provider: 'azure',
+    modelName,
+    temperature,
+    destinationName,
+    langchain: azureClient,
+    async *stream(messages) {
+      const normalized = normalizeMessages(messages);
+      const stream = await azureClient.stream(normalized);
+      for await (const chunk of stream) {
+        const piece = extractTextContent(chunk?.content);
+        if (piece) yield piece;
+      }
+    },
+    async complete(messages) {
+      const normalized = normalizeMessages(messages);
+      const result = await azureClient.invoke(normalized);
+      return extractTextContent(result?.content);
+    }
+  };
+}
+
+module.exports = {
+  createChatProvider
+};
+</file>
+
+<file path="claim-flat.cds">
+using { sap.kfz as kfz } from '../db/schema';
+
+entity ClaimFlat as select from kfz.Claim {
+  *,
+  policy.policyNumber as policyNumber,
+  vehicle.plate       as plate
+};
+</file>
+
+<file path="fe-annotations.cds">
+using KfzService as service from './service';
+
+annotate service.Claim with @(
+  UI.HeaderInfo : {
+    TypeName       : 'Schaden',
+    TypeNamePlural : 'Schaeden',
+    Title          : { Value : claimNumber },
+    Description    : { Value : status }
+  },
+
+  UI.SelectionFields : [
+    claimNumber, status, severity, lossDate
+  ],
+
+  UI.LineItem : [
+    { $Type : 'UI.DataField', Value : claimNumber,            Label : 'Claim',        ![@UI.Importance] : #High },
+    { $Type : 'UI.DataField', Value : policy.policyNumber,    Label : 'Police',       ![@UI.Importance] : #High },
+    { $Type : 'UI.DataField', Value : vehicle.plate,          Label : 'Kennzeichen',  ![@UI.Importance] : #High },
+    { $Type : 'UI.DataField', Value : lossDate,               Label : 'Schadendatum', ![@UI.Importance] : #High },
+    { $Type : 'UI.DataField', Value : status,                 Label : 'Status',       ![@UI.Importance] : #High },
+    { $Type : 'UI.DataField', Value : severity,               Label : 'Schadenschwere' },
+    { $Type : 'UI.DataField', Value : reportedDate,           Label : 'Meldedatum' }
+  ],
+
+  UI.Facets : [
+    {
+      $Type : 'UI.ReferenceFacet',
+      Label : 'Allgemeine Informationen',
+      Target: '@UI.FieldGroup#General'
+    },
+    {
+      $Type : 'UI.ReferenceFacet',
+      Label : 'Beschreibung',
+      Target: '@UI.FieldGroup#Description'
+    },
+    {
+      $Type : 'UI.ReferenceFacet',
+      Label : 'E-Mails',
+      Target: 'emails/@UI.LineItem'
+    },
+    {
+      $Type : 'UI.ReferenceFacet',
+      Label : 'Dokumente',
+      Target: 'documents/@UI.LineItem'
+    },
+    {
+      $Type : 'UI.ReferenceFacet',
+      Label : 'Aufgaben',
+      Target: 'tasks/@UI.LineItem'
+    }
+  ],
+
+  UI.FieldGroup #General : {
+    Data : [
+      { Value : claimNumber,          Label : 'Claim' },
+      { Value : status,               Label : 'Status' },
+      { Value : severity,             Label : 'Schadenschwere' },
+      { Value : lossDate,             Label : 'Schadendatum' },
+      { Value : reportedDate,         Label : 'Meldedatum' },
+      { Value : policy.policyNumber,  Label : 'Police' },
+      { Value : vehicle.plate,        Label : 'Kennzeichen' },
+      { Value : reserveAmount,        Label : 'Reserve' }
+    ]
+  },
+
+  UI.FieldGroup #Description : {
+    Data : [
+      { Value : description, Label : 'Beschreibung' }
+    ]
+  }
+);
+
+annotate service.Claim with {
+  description   @title : 'Beschreibung'            @UI.MultiLineText;
+  claimNumber   @title : 'Claim';
+  status        @title : 'Status';
+  severity      @title : 'Schadenschwere';
+  lossDate      @title : 'Schadendatum';
+  reportedDate  @title : 'Meldedatum';
+  reserveAmount @title : 'Reserve';
+};
+
+annotate service.Claim with @(
+  Capabilities.InsertRestrictions  : { Insertable : true },
+  Capabilities.UpdateRestrictions  : { Updatable  : true },
+  Capabilities.DeleteRestrictions  : { Deletable  : true }
+);
+
+annotate service.Claim with {
+  policy @Common.ValueList : {
+    $Type          : 'Common.ValueListType',
+    CollectionPath : 'Policy',
+    Parameters     : [
+      { $Type : 'Common.ValueListParameterInOut',  LocalDataProperty : policy_ID,  ValueListProperty : 'ID' },
+      { $Type : 'Common.ValueListParameterDisplayOnly', ValueListProperty : 'policyNumber' }
+    ]
+  };
+  vehicle @Common.ValueList : {
+    $Type          : 'Common.ValueListType',
+    CollectionPath : 'Vehicle',
+    Parameters     : [
+      { $Type : 'Common.ValueListParameterInOut',  LocalDataProperty : vehicle_ID, ValueListProperty : 'ID' },
+      { $Type : 'Common.ValueListParameterDisplayOnly', ValueListProperty : 'plate' }
+    ]
+  };
+};
+
+annotate service.Email with @(
+  UI.LineItem : [
+    { $Type : 'UI.DataField', Value : subject,       Label : 'Betreff' },
+    { $Type : 'UI.DataField', Value : fromAddress,   Label : 'Von' },
+    { $Type : 'UI.DataField', Value : receivedAt,    Label : 'Empfangen am' },
+    { $Type : 'UI.DataField', Value : hasAttachments,Label : 'Anhänge' }
+  ]
+);
+
+annotate service.Email with @(
+  Capabilities.InsertRestrictions  : { Insertable : true },
+  Capabilities.UpdateRestrictions  : { Updatable  : true },
+  Capabilities.DeleteRestrictions  : { Deletable  : true }
+);
+
+annotate service.Document with @(
+  UI.LineItem : [
+    { $Type : 'UI.DataField', Value : fileName,   Label : 'Datei' },
+    { $Type : 'UI.DataField', Value : mimeType,   Label : 'Typ' },
+    { $Type : 'UI.DataField', Value : source,     Label : 'Quelle' }
+  ]
+);
+
+annotate service.Document with @(
+  Capabilities.InsertRestrictions  : { Insertable : true },
+  Capabilities.UpdateRestrictions  : { Updatable  : true },
+  Capabilities.DeleteRestrictions  : { Deletable  : true }
+);
+
+annotate service.Task with @(
+  UI.LineItem : [
+    { $Type : 'UI.DataField', Value : type,     Label : 'Typ' },
+    { $Type : 'UI.DataField', Value : status,   Label : 'Status' },
+    { $Type : 'UI.DataField', Value : dueDate,  Label : 'Fällig am' },
+    { $Type : 'UI.DataField', Value : assignee, Label : 'Bearbeiter' }
+  ]
+);
+
+annotate service.Task with @(
+  Capabilities.InsertRestrictions  : { Insertable : true },
+  Capabilities.UpdateRestrictions  : { Updatable  : true },
+  Capabilities.DeleteRestrictions  : { Deletable  : true }
+);
+</file>
+
+<file path="server.js">
+const cds = require('@sap/cds');
+// Ensure .env is loaded early so DB creds are available
+try { require('dotenv').config(); } catch (_) { /* optional */ }
+const { createChatProvider } = require('./chat-provider');
+
+// Ensure Postgres config is concretely resolved from environment
+(() => {
+  try {
+    const cfg = (cds && cds.env && cds.env.requires && cds.env.requires.db) || {};
+    const envUrl = process.env.DATABASE_URL;
+    const envPg = {
+      host: process.env.POSTGRES_HOST,
+      port: process.env.POSTGRES_PORT,
+      database: process.env.POSTGRES_DATABASE,
+      user: process.env.POSTGRES_USER,
+      password: process.env.POSTGRES_PASSWORD
+    };
+    const hasEnvUrl = !!envUrl;
+    const hasEnvPg = !!(envPg.host && envPg.database && envPg.user);
+    const placeholderUrl = typeof cfg?.credentials?.url === 'string' && cfg.credentials.url.includes('{env.');
+    const placeholderHost = typeof cfg?.credentials?.host === 'string' && cfg.credentials.host.includes('{env.');
+
+    // Force dialect to postgres for hybrid profile
+    cds.env.sql = cds.env.sql || {};
+    cds.env.sql.dialect = 'postgres';
+
+    const keepPool = cfg && cfg.pool ? cfg.pool : undefined;
+    const keepClient = cfg && cfg.client ? cfg.client : undefined;
+    if (hasEnvUrl) {
+      const parsePgUrl = (u) => {
+        try {
+          const x = new URL(u);
+          return {
+            host: x.hostname,
+            port: x.port ? Number(x.port) : 5432,
+            database: (x.pathname || '').replace(/^\//, ''),
+            user: decodeURIComponent(x.username || ''),
+            password: decodeURIComponent(x.password || ''),
+          };
+        } catch (_) { return null; }
+      };
+      const parsed = parsePgUrl(envUrl) || {};
+      parsed.schema = 'public';
+      cds.env.requires.db = {
+        kind: 'postgres',
+        impl: '@cap-js/postgres',
+        credentials: parsed,
+        ...(keepPool ? { pool: keepPool } : {}),
+        client: { ...(keepClient || {}), connectionTimeoutMillis: (keepClient && keepClient.connectionTimeoutMillis) || 10000, connectionString: envUrl }
+      };
+    } else if (hasEnvPg && (cfg.kind !== 'postgres' || placeholderHost)) {
+      cds.env.requires.db = {
+        kind: 'postgres',
+        impl: '@cap-js/postgres',
+        credentials: {
+          host: envPg.host,
+          port: envPg.port ? Number(envPg.port) : 5432,
+          database: envPg.database,
+          user: envPg.user,
+          password: envPg.password,
+          schema: 'public'
+        },
+        ...(keepPool ? { pool: keepPool } : {}),
+        ...(keepClient ? { client: keepClient } : {})
+      };
+    } else if (placeholderUrl) {
+      // If only placeholder URL is set but env not loaded, try to resolve now
+      if (process.env.DATABASE_URL) {
+        cds.env.requires.db.credentials.url = process.env.DATABASE_URL;
+      }
+    }
+  } catch (e) {
+    // Swallow to not block startup; logs only in debug
+    if (process.env.DEBUG) console.warn('[db-config]', e && e.message);
+  }
+})();
+
+async function streamGenAI(prompt, res, opts = {}) {
+  function sseWrite(res, data) {
+    if (data == null) return;
+    const s = String(data);
+    const lines = s.split(/\r?\n/);
+    for (const line of lines) {
+      res.write(`data: ${line}\n`);
+    }
+    res.write(`\n`);
+  }
+  const client = await createChatProvider();
+  const messages = [{ role: 'user', content: String(prompt || '') }];
+  const forceFallback = !!opts.forceFallback;
+  try {
+    if (forceFallback) throw new Error('forced-fallback');
+    for await (const piece of client.stream(messages)) {
+      if (piece) sseWrite(res, piece);
+    }
+  } catch (e) {
+    const text = String(await client.complete(messages) || '');
+    const chunkSize = 64;
+    for (let i = 0; i < text.length; i += chunkSize) {
+      const piece = text.slice(i, i + chunkSize);
+      if (piece) sseWrite(res, piece);
+      await new Promise(r => setTimeout(r, 10));
+    }
+  }
+  res.write(`event: end\n`);
+  res.write(`data: [DONE]\n\n`);
+  res.end();
+}
+
+cds.on('bootstrap', (app) => {
+  // Frühzeitige Initialisierung des Agents inkl. MCP-Clients
+  (async () => {
+    try {
+      const { initAgent } = require('./agent');
+      await initAgent();
+      console.log('[AGENT][startup]', { status: 'initialized' });
+    } catch (e) {
+      console.warn('[AGENT][startup_failed]', e && e.message ? e.message : String(e));
+    }
+  })();
+
+  // Server-Sent Events endpoint for streaming chat responses
+  app.post('/ai/stream', expressJson(), async (req, res) => {
+    try {
+      const prompt = (req.body && req.body.prompt) || '';
+      res.status(200);
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders && res.flushHeaders();
+      const forceFallback = req.headers['x-use-fallback'] === '1' || req.query.fallback === '1';
+      await streamGenAI(prompt, res, { forceFallback });
+    } catch (e) {
+      try {
+        res.write(`event: error\n`);
+        res.write(`data: ${JSON.stringify({ message: e && e.message ? e.message : String(e) })}\n\n`);
+        res.end();
+      } catch (_) { /* ignore */ }
+    }
+  });
+  // Agent endpoint: LangGraph + MCP tools (no fallback)
+  app.post('/ai/agent/stream', expressJson(), async (req, res) => {
+    try {
+      const { runAgentStreaming } = require('./agent');
+      const prompt = (req.body && req.body.prompt) || '';
+      const threadId = (req.body && req.body.threadId) || undefined;
+      res.status(200);
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders && res.flushHeaders();
+      await runAgentStreaming({ prompt, threadId, res });
+    } catch (e) {
+      try {
+        res.write(`event: error\n`);
+        res.write(`data: ${JSON.stringify({ message: e && e.message ? e.message : String(e) })}\n\n`);
+        res.end();
+      } catch (_) { /* ignore */ }
+    }
+  });
+});
+
+function expressJson() {
+  const express = require('express');
+  return express.json();
+}
+
+module.exports = {};
+</file>
+
+<file path="service.cds">
+using { sap.kfz as kfz } from '../db/schema';
+
+service KfzService @(path:'/service/kfz') {
+  entity Insured   as projection on kfz.Insured;
+  entity Policy    as projection on kfz.Policy;
+  entity Vehicle   as projection on kfz.Vehicle;
+  @odata.draft.enabled
+  entity Claim     as projection on kfz.Claim;
+  entity Email     as projection on kfz.Email;
+  entity Document  as projection on kfz.Document;
+  entity Task      as projection on kfz.Task;
+
+  type ChatResponse { response : LargeString; }
+  action callLLM(prompt : String) returns ChatResponse;
+}
+</file>
+
+<file path="service.js">
+// .env loading optional; CAP usually injects env via process environment
+
+const escapeHtml = (str = '') => String(str)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/\"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
+function buildHtmlResponse(title, bodyHtml) {
+  return [
+    '<section style="font-family:Arial,Helvetica,sans-serif">',
+    `<h3>${escapeHtml(title)}</h3>`,
+    bodyHtml,
+    '</section>'
+  ].join('\n');
+}
+
+async function callChatCompletion(prompt) {
+  const { createChatProvider } = require('./chat-provider');
+  const client = await createChatProvider();
+  const messages = [{ role: 'user', content: String(prompt || '') }];
+  const text = await client.complete(messages);
+  return {
+    text: String(text || '').trim(),
+    provider: client.provider,
+    modelName: client.modelName
+  };
+}
+
+module.exports = async (srv) => {
+  srv.on('callLLM', async (req) => {
+    const { prompt } = req.data || {};
+
+    try {
+      const { text, provider, modelName } = await callChatCompletion(prompt);
+      const label = provider === 'openrouter'
+        ? `${modelName} via OpenRouter`
+        : `${modelName} via SAP GenAI Destination`;
+      const safeAnswer = escapeHtml(text);
+      const html = buildHtmlResponse(`AI Antwort (${escapeHtml(label)})`, `<pre style=\"white-space:pre-wrap\">${safeAnswer}</pre>`);
+      return { response: html };
+    } catch (e) {
+      const reason = e && e.message ? e.message : String(e);
+      const configuredProvider = String((process.env.AI_PROVIDER || 'azure')).toLowerCase();
+      const hints = configuredProvider === 'openrouter'
+        ? [
+            '<li>Env Variable \"OPENROUTER_API_KEY\" ist gesetzt.</li>',
+            '<li>\"OPENROUTER_MODEL_NAME\" verweist auf ein verfügbares OpenRouter Modell.</li>',
+            '<li>HTTPS Zugriff auf https://openrouter.ai ist möglich.</li>'
+          ]
+        : [
+            '<li>Destination \"aicore-destination\" existiert im BTP Destination Service.</li>',
+            '<li>Lokale Bindings vorhanden (cds bind destination/aicore) für Hybrid.</li>',
+            '<li>Ausgehende Netzwerkverbindung ist erlaubt.</li>'
+          ];
+      const html = buildHtmlResponse('AI Fehler', [
+        `<p>Die Anfrage an den LLM Provider (${escapeHtml(configuredProvider)}) ist fehlgeschlagen.</p>`,
+        `<p><b>Grund:</b> ${escapeHtml(reason)}</p>`,
+        '<p>Bitte prüfen:</p>',
+        `<ul>${hints.join('')}</ul>`
+      ].join(''));
+      return { response: html };
+    }
+  });
+};
+</file>
+
+</files>

@@ -72,10 +72,11 @@ test('excel read range schema surfaces sheetName and range controls', () => {
   const { inputSchema } = readRange;
   assert.equal(inputSchema.type, 'object');
   assert.ok(inputSchema.required.includes('driveItemId'));
-  assert.ok(inputSchema.required.includes('workbookSession')); // ensures deterministic session handling
+  assert.ok(!inputSchema.required.includes('workbookSession'));
   assert.ok(Object.prototype.hasOwnProperty.call(inputSchema.properties, 'sheetName'));
   assert.ok(Object.prototype.hasOwnProperty.call(inputSchema.properties, 'range'));
   assert.ok(Object.prototype.hasOwnProperty.call(inputSchema.properties, 'valuesOnly'));
+  assert.ok(Object.prototype.hasOwnProperty.call(inputSchema.properties, 'workbookSession'));
   assert.equal(inputSchema.properties.valuesOnly.type, 'boolean');
   assert.deepEqual(readRange.outputSchema.properties.values.type, 'array');
 });
